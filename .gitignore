@@ -6,3 +6,6 @@ pyvenv.cfg
 share
 datasets
 Data_viz.ipynb
+NeuralNetwork/EuroSAT/*
+NeuralNetwork/EuroSATallBands/*
+NeuralNetwork/eurosat-dataset.zip
