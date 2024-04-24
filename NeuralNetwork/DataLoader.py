@@ -22,11 +22,11 @@ class EuroSAT(Dataset):
         image = Image.open(image_path)
         
         if self.transform:
-            image = self.transform(image)
+            img = self.transform(image)
         
         label = self.labels[idx]
          
-        return image , label        
+        return img , label        
         
         
     
