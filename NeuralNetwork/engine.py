@@ -52,11 +52,11 @@ def train_one_epoch(model , training_loader , validation_loader, optimizer ,loss
 
 def test_one_epoch(model , test_loader , loss_func , device):
     
-    model.eval()
+    # model.eval()
     test_loss = 0.0
     batch_loss = 0.0
       
-    with torch.no_grad:
+    with torch.no_grad():
         for i , batch in enumerate(test_loader):
             
             images , labels = batch 
