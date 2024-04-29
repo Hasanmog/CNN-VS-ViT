@@ -1,5 +1,6 @@
 import torch
 import neptune
+import numpy as np
 from tqdm import tqdm
 from torch.optim import optimizer
 from torch.nn.functional import cross_entropy
@@ -14,6 +15,8 @@ def train_one_epoch(model , training_loader , validation_loader, optimizer ,lr_s
 
     batch_loss = 0.0
     train_loss = 0.0
+    correct_predictions = 0
+    total_predictions = 0
     losses = 0
     model.train(True)
     model.to(device)
@@ -55,9 +58,14 @@ def train_one_epoch(model , training_loader , validation_loader, optimizer ,lr_s
                 
                 loss = loss_func(outputs , labels)
                 batch_loss += loss.item()
-            
+                _, predicted = torch.max(outputs, 1)
+                correct_predictions += (predicted == labels).sum().item()
+                total_predictions += labels.size(0)
+                
+            accuracy = correct_predictions / total_predictions
             val_loss = batch_loss / len(validation_loader)
             print("Validation Loss:" , val_loss)
+            print("Validation Accuracy" , accuracy*100)
             
             if val_loss > losses:
                 torch.save({
@@ -71,30 +79,38 @@ def train_one_epoch(model , training_loader , validation_loader, optimizer ,lr_s
                 losses = val_loss
         run['training loss per Epoch'].log(train_loss)
         run['validation loss per Epoch'].log(val_loss)
+        run['validation Accuracy per Epoch'].log(accuracy*100)
         
     run.stop()  
     return train_loss , val_loss , current_lr
 # run.stop()
-def test_one_epoch(model , test_loader , loss_func , device):
-    
-    # model.eval()
+def test_one_epoch(model, test_loader, loss_func, device):
+    model.eval()  # Ensure the model is in evaluation mode
     test_loss = 0.0
-    batch_loss = 0.0
-      
+    correct_predictions = 0
+    total_samples = 0
+
     with torch.no_grad():
-        for i , batch in enumerate(test_loader):
-            
-            images , labels = batch 
+        for images, labels in test_loader:
             images = images.to(device)
             labels = labels.to(device)
-            
+
             outputs = model(images)
-            
-            loss = loss_func(outputs , labels)
-            batch_loss += loss.item()
-        
-        test_loss = batch_loss / len(test_loader)
-        print("Test Loss:" , test_loss)
-        
-    return test_loss
+            loss = loss_func(outputs, labels)
+            test_loss += loss.item()
+
+            # Convert outputs to probabilities and find the predicted class
+            _, predicted_classes = torch.max(outputs, 1)
+            correct_predictions += (predicted_classes == labels).sum().item()
+            total_samples += labels.size(0)
+
+    average_test_loss = test_loss / len(test_loader)
+    accuracy = correct_predictions / total_samples
+
+    print("Test Loss:", average_test_loss)
+    print("Accuracy:", accuracy * 100)
+
+    return average_test_loss, accuracy
+
+
             

@@ -9,5 +9,5 @@ Data_viz.ipynb
 NeuralNetwork/EuroSAT/*
 NeuralNetwork/EuroSATallBands/*
 NeuralNetwork/eurosat-dataset.zip
-NeuralNetwork/weights/NN_attempt_1
+NeuralNetwork/weights/NN*
 NeuralNetwork/.neptune
