@@ -6,8 +6,8 @@ pyvenv.cfg
 share
 datasets
 Data_viz.ipynb
-NeuralNetwork/EuroSAT/*
-NeuralNetwork/EuroSATallBands/*
-NeuralNetwork/eurosat-dataset.zip
-NeuralNetwork/weights/NN*
-NeuralNetwork/.neptune
+Classifiers/EuroSAT/*
+Classifiers/EuroSATallBands/*
+Classifiers/eurosat-dataset.zip
+Classifiers/weights/NN*
+Classifiers/.neptune
