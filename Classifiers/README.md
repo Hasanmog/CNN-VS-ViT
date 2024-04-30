@@ -56,10 +56,12 @@ The deep learning model trained on the EuroSAT dataset demonstrated excellent pe
 - **Test Loss:** `0.557`
 - **Test Accuracy:** `89.33%`
 
+```
+
 ### Analysis
 
 The results indicate that the model is capable of accurately classifying different land use and land cover types from satellite images with high accuracy. The relatively low training and validation losses suggest that the model has learned the underlying patterns in the data effectively, without overfitting.
 
-Note: These results are just for four neural network trials and variations of hyperparameters as you can see in the [log](weights/Attempts.txt).
+## Experiment Logs
 
-```
+For detailed logs of the classification attempts, including hyperparameter variations and outcomes, see the [View Attempts Log](Attempts.txt). This log provides insights into the iterative process of model tuning and performance evaluation.
