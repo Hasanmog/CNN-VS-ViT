@@ -11,3 +11,4 @@ Classifiers/EuroSATallBands/*
 Classifiers/eurosat-dataset.zip
 Classifiers/weights/NN*
 Classifiers/.neptune
+Semantic-Segmentation/dataset
