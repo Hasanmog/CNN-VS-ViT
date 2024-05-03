@@ -4,6 +4,7 @@ lib
 lib64
 pyvenv.cfg
 share
+etc/jupyter/nbconfig/notebook.d
 datasets
 Data_viz.ipynb
 Classifiers/EuroSAT/*
