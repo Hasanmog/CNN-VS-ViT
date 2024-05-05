@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import neptune
+
 from torch.nn import functional
 from tqdm import tqdm
 from metrics import iou
@@ -15,7 +16,7 @@ def train_one_epoch(model , train_loader , val_loader ,epochs , lr , scheduler ,
     
     batch_loss = 0
     batch_iou = 0
-    val_meter = 0
+    val_meter = float('inf')
     model = model.to(device)
     
     optimizer = torch.optim.Adam(model.parameters() , lr = lr)
@@ -37,20 +38,19 @@ def train_one_epoch(model , train_loader , val_loader ,epochs , lr , scheduler ,
     
     
     start_epoch = 0
-    for epoch in tqdm(range(start_epoch, epochs)):
-        
+    for epoch in tqdm(range(start_epoch, epochs) , desc = "Epoch Progress" , leave= True):
+        batch_loss = 0.0  # Reset loss counter for the training batches
+        batch_iou = 0.0   # Reset IoU counter for the training batches
         print("Current Epoch : " , epoch + 1)
         model.train(True)
         
-        for i , batch in enumerate(train_loader):
-            
+        for i , batch in tqdm(enumerate(train_loader) , desc = "Training Batching Progress" , leave = False):
             images, masks = batch
             images = images.to(device)
             masks = masks.to(device)
             optimizer.zero_grad()
             
             pred = model(images)
-            pred = torch.sigmoid(pred)
             loss = functional.binary_cross_entropy(pred , masks)
             IOU = iou(pred , masks)
             loss.backward()
@@ -81,9 +81,8 @@ def train_one_epoch(model , train_loader , val_loader ,epochs , lr , scheduler ,
                 images = images.to(device)
                 masks = masks.to(device)
                 pred = model(images)
-                pred = torch.sigmoid(pred)
                 loss = functional.binary_cross_entropy(pred , masks)
-                IoU = IOU(pred , masks)
+                IoU = iou(pred , masks)
                 batch_loss += loss.item()
                 batch_iou += IoU.item()
             
@@ -92,7 +91,7 @@ def train_one_epoch(model , train_loader , val_loader ,epochs , lr , scheduler ,
         print("Final Validation Loss:", val_loss)
         print("Final Validation IoU:", val_iou)
         
-        if val_loss > val_meter:
+        if val_loss < val_meter:
             
             torch.save({
                     'epoch': epoch + 1,
@@ -112,14 +111,14 @@ def train_one_epoch(model , train_loader , val_loader ,epochs , lr , scheduler ,
         run['validation loss per Epoch'].log(val_loss)
         run['Validation IoU per Epoch'].log(val_iou)
         
-        metrics = {
+    metrics = {
             'train_loss' : train_loss , 
             'val_loss' : val_loss ,
             'train_iou' : train_iou , 
             'val_iou' : val_iou
         }
         
-        run.stop()
-        return metrics
+    run.stop()
+    return metrics
     
             

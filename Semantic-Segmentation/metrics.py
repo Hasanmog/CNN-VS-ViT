@@ -1,29 +1,31 @@
 import torch
 
-def iou(outputs, labels, smooth=1e-6):
+def iou(outputs, targets, smooth=1e-6):
     """
-    Compute the IoU (Intersection over Union) metric.
+    Compute the IoU (Jaccard Index) between the predicted and target masks.
     
-    Parameters:
-    outputs (torch.Tensor): The model predictions, shape (N, C, H, W),
-                            where N is the batch size, C is the number of classes,
-                            H and W are the dimensions of the image.
-    labels (torch.Tensor): The ground truth labels, shape (N, H, W) with class indices.
-    
+    Args:
+        outputs (torch.Tensor): the logits from your model (before sigmoid/softmax).
+        targets (torch.Tensor): the ground truth labels.
+        smooth (float): A small value to avoid division by zero.
+
     Returns:
-    float: The average IoU score over the batch.
+        float: the computed IoU.
     """
-    # Assume outputs are raw logits from the network
-    outputs = torch.sigmoid(outputs) > 0.5  # Apply sigmoid and threshold to get binary map
+    # Assuming outputs are probabilities (after sigmoid/softmax)
+    outputs = torch.sigmoid(outputs) > 0.5  # Threshold probabilities to get binary tensor
     outputs = outputs.float()  # Convert boolean tensor to float
+
+    # Flatten the tensors to simplify computation
+    outputs = outputs.view(-1)
+    targets = targets.view(-1)
     
-    # Create a one-hot encoding of labels (N, C, H, W)
-    labels_one_hot = torch.nn.functional.one_hot(labels, num_classes=outputs.shape[1]).permute(0, 3, 1, 2).float()
-    
-    # Calculate intersection and union
-    intersection = (outputs * labels_one_hot).sum(dim=(2, 3))  # Sum over height and width
-    union = (outputs + labels_one_hot - outputs * labels_one_hot).sum(dim=(2, 3))  # Sum over height and width
-    
-    # Compute IoU and average over batch
-    iou = (intersection + smooth) / (union + smooth)
-    return iou.mean()
+    # Compute Intersection and Union
+    intersection = (outputs * targets).sum()
+    total = (outputs + targets).sum()
+    union = total - intersection
+
+    # Compute the IoU
+    IoU = (intersection + smooth) / (union + smooth)
+    return IoU
+
