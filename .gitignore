@@ -5,14 +5,9 @@ lib64
 pyvenv.cfg
 share
 etc/jupyter/nbconfig/notebook.d
-datasets
-Data_viz.ipynb
-Classifiers/EuroSAT/*
-Classifiers/EuroSATallBands/*
-Classifiers/eurosat-dataset.zip
 Classifiers/weights/NN*
 Classifiers/.neptune
-Semantic-Segmentation/dataset
 Semantic-Segmentation/.neptune
 Semantic-Segmentation/weights
+Semantic-Segmentation/__pycache__
 Datasets

@@ -1,32 +1,71 @@
 import os
-import torch.nn as nn
+import pandas as pd
+import torch
+import numpy as np
+from torchvision import  transforms
+from torchvision.transforms import ToTensor
+from torch.utils.data import Dataset 
 from PIL import Image
-from torch.utils.data import Dataset
 
-class WHU_bldg(Dataset):
-    def __init__(self , parent_dir : str , set : str , transform_rgb = None , transform_grey = None):
+class Drone(Dataset):
+    def __init__(self, parent_dir, images, masks):
+        """
+        Initialize the dataset by setting the paths to images and masks,
+        preparing transformations, and loading color mappings.
         
-        self.images_dir = os.path.join(parent_dir , set , 'Images')
-        self.masks_dir = os.path.join(parent_dir , set , 'Masks')
-        self.transform_rgb = transform_rgb
-        self.transform_grey = transform_grey
+        Args:
+            parent_dir (str): Path to the parent folder of the dataset.
+            images (list of str): List of image file names.
+            masks (list of str): List of mask file names.
+        """
+        images_dir = os.path.join(parent_dir, "dataset/semantic_drone_dataset/original_images")
+        rgb_masks_dir = os.path.join(parent_dir, "RGB_color_image_masks/RGB_color_image_masks")
+        self.images_paths = [os.path.join(images_dir, image) for image in images]
+        self.masks_paths = [os.path.join(rgb_masks_dir, mask) for mask in masks]
+
+        self.transform_imgs = transforms.Compose([
+            transforms.Resize((512, 512)), 
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         
-        self.images = [os.path.join(self.images_dir, f) for f in sorted(os.listdir(self.images_dir))]
-        self.masks = [os.path.join(self.masks_dir , f) for f in sorted(os.listdir(self.masks_dir))]
+        self.transform_masks = transforms.Compose([
+            transforms.Resize((512, 512)),  
+            transforms.ToTensor()
+        ])
+
+        color_mapping = pd.read_csv(os.path.join(parent_dir, "class_dict_seg.csv"))
+        self.color_map ={ (row[' r'], row[' g'], row[' b']): idx for idx, row in color_mapping.iterrows() }
         
     def __len__(self):
-        return len(self.images)
-        
-    def __getitem__(self , idx ):
-        
-        image = Image.open(self.images[idx]).convert("RGB")
-        mask = Image.open(self.masks[idx]).convert("L")
-        
-        if self.transform_rgb:
-            image = self.transform_rgb(image)
-        if self.transform_grey:
-            mask = self.transform_grey(mask)
-        
-        return image , mask
+        return len(self.images_paths)
+    
+    def __getitem__(self, idx):
+        image = Image.open(self.images_paths[idx]).convert('RGB')
+        mask = Image.open(self.masks_paths[idx]).convert('RGB')
 
+        image = self.transform_imgs(image)
+
+        # Convert mask from RGB to class IDs based on the color mapping
+        mask = self.transform_masks(mask)
+        mask = self.rgb_to_class_id(mask)
+
+        return image, mask
+
+    def rgb_to_class_id(self, mask):
+        """Convert RGB mask to class ID mask."""
+        mask_array = np.array(mask)
+        class_id_mask = np.zeros(mask_array.shape[:2], dtype=int)
+        
+        for rgb, class_id in self.color_map.items():
+            matches = (mask_array == rgb).all(axis=-1)
+            class_id_mask[matches] = class_id
+        
+        return torch.tensor(class_id_mask, dtype=torch.long)
+        
+
+        
+        
+        
+        
         
