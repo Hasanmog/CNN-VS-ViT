@@ -7,7 +7,9 @@ share
 etc/jupyter/nbconfig/notebook.d
 Classifiers/weights/NN*
 Classifiers/.neptune
+Classifiers/__pycache__
 Semantic-Segmentation/.neptune
 Semantic-Segmentation/weights
 Semantic-Segmentation/__pycache__
 Datasets
+neptune.json

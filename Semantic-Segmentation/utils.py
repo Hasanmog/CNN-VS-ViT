@@ -1,5 +1,8 @@
 import random
 import os
+import torch
+import numpy as np
+
 
 def dataset_split(img_dir, masks_dir):
     # List all image files
@@ -31,3 +34,36 @@ def dataset_split(img_dir, masks_dir):
                 masks_sets[i].append(corresponding_mask)
 
     return sets, masks_sets
+
+def calculate_iou(preds, labels, num_classes = 23):
+    """
+    Calculate the Intersection over Union (IoU) from model predictions after softmax.
+
+    Args:
+        preds (torch.Tensor): Softmaxed predictions of shape (N, C, H, W) where
+                              N is the batch size, C is the number of classes,
+                              H and W are the height and width of the image.
+        labels (torch.Tensor): Ground truth labels of shape (N, H, W).
+        num_classes (int): Number of classes.
+
+    Returns:
+        float: Mean IoU over all classes.
+    """
+    # Convert probabilistic predictions to discrete class predictions
+    preds = torch.argmax(preds, dim=1)  # This collapses the C (classes) dimension
+
+    ious = []
+    for cls in range(num_classes):
+        pred_inds = (preds == cls)
+        label_inds = (labels == cls)
+        intersection = (pred_inds & label_inds).float().sum()  # Logical AND
+        union = (pred_inds | label_inds).float().sum()         # Logical OR
+        
+        if union == 0:
+            ious.append(float('nan'))  # No presence of class in both pred and label
+        else:
+            ious.append((intersection / union).item())
+
+    mean_iou = np.nanmean(ious)  # Compute the mean IoU, ignoring NaN values
+    return mean_iou
+

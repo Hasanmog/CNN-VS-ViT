@@ -1,4 +1,5 @@
 import torch
+import json
 import neptune
 import numpy as np
 from tqdm import tqdm
@@ -6,22 +7,19 @@ from torch.optim import optimizer
 from torch.nn.functional import cross_entropy
 
 
-def train_one_epoch(model , training_loader , validation_loader, optimizer ,lr_scheduler ,epochs , loss_func, device , out_dir):
+def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_scheduler, epochs, loss_func, device, out_dir, resume=False, checkpoint_path=None , neptune_id = None , neptune_config = None):
     
-    run = neptune.init_run(
-    project='Solo/Solo',  # specify your project name here
-    api_token= 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzZjFkNjIxNy1jOWZlLTQzZTUtYTA3OS0zMjhlM2UwNTMzODYifQ==',
-    #with_id = 'VLMEO-1048'
-    )   
-def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_scheduler, epochs, loss_func, device, out_dir, resume=False, checkpoint_path=None , neptune_id = None):
-    
+    with open(neptune_config) as config_file:
+            config = json.load(config_file)
+    api_token = config['api_token']
+    project = config['project']
     # Initialize or resume Neptune run
     if resume and checkpoint_path:
         run = neptune.init_run(
-                    project='Solo/Solo',  # specify your project name here
-                    api_token= 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzZjFkNjIxNy1jOWZlLTQzZTUtYTA3OS0zMjhlM2UwNTMzODYifQ==',
+                    project=project,  # specify your project name here
+                    api_token= api_token,
                     with_id = neptune_id
-                    )   
+    )   
         
         # Load checkpoint
         checkpoint = torch.load(checkpoint_path)
@@ -32,8 +30,8 @@ def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_sch
         print(f"Resuming training from epoch {start_epoch}")
     else:
         run = neptune.init_run(
-                    project='Solo/Solo',  # specify your project name here
-                    api_token= 'eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIzZjFkNjIxNy1jOWZlLTQzZTUtYTA3OS0zMjhlM2UwNTMzODYifQ==',
+                    project=project,  # specify your project name here
+                    api_token= api_token,
                     #with_id = 'VLMEO-1048'
     )   
         start_epoch = 0

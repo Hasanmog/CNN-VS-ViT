@@ -26,7 +26,7 @@ class Drone(Dataset):
         self.transform_imgs = transforms.Compose([
             transforms.Resize((512, 512)), 
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         
         self.transform_masks = transforms.Compose([
@@ -42,7 +42,7 @@ class Drone(Dataset):
     
     def __getitem__(self, idx):
         image = Image.open(self.images_paths[idx]).convert('RGB')
-        mask = Image.open(self.masks_paths[idx]).convert('RGB')
+        mask = Image.open(self.masks_paths[idx])
 
         image = self.transform_imgs(image)
 
@@ -54,14 +54,19 @@ class Drone(Dataset):
 
     def rgb_to_class_id(self, mask):
         """Convert RGB mask to class ID mask."""
-        mask_array = np.array(mask)
+        # Assuming mask tensor is scaled from 0 to 1, convert it back to 0-255
+        mask_array = np.array(mask.permute(1, 2, 0) * 255, dtype=int)
         class_id_mask = np.zeros(mask_array.shape[:2], dtype=int)
         
         for rgb, class_id in self.color_map.items():
+            # Ensure the RGB tuple is in integer form
+            rgb = tuple(map(int, rgb))
             matches = (mask_array == rgb).all(axis=-1)
             class_id_mask[matches] = class_id
-        
+
         return torch.tensor(class_id_mask, dtype=torch.long)
+
+
         
 
         
