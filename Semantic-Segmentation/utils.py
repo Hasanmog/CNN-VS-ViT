@@ -35,35 +35,37 @@ def dataset_split(img_dir, masks_dir):
 
     return sets, masks_sets
 
-def calculate_iou(preds, labels, num_classes = 23):
+
+def calculate_iou(preds, labels, threshold=0.5, pos_label=1):
     """
-    Calculate the Intersection over Union (IoU) from model predictions after softmax.
+    Calculate the Intersection over Union (IoU) for a single class segmentation
+    where predictions are given as sigmoid outputs.
 
     Args:
-        preds (torch.Tensor): Softmaxed predictions of shape (N, C, H, W) where
-                              N is the batch size, C is the number of classes,
+        preds (torch.Tensor): Sigmoid predictions of shape (N, C, H, W) where
+                              N is the batch size, C is the number of classes (typically 2 for binary classification),
                               H and W are the height and width of the image.
-        labels (torch.Tensor): Ground truth labels of shape (N, H, W).
-        num_classes (int): Number of classes.
+        labels (torch.Tensor): Ground truth labels of shape (N, H, W), with values 0 and 1.
+        threshold (float): Threshold to convert sigmoid outputs to binary class labels.
+        pos_label (int): The label of the positive class (default is 1).
 
     Returns:
-        float: Mean IoU over all classes.
+        float: IoU for the positive class.
     """
-    # Convert probabilistic predictions to discrete class predictions
-    preds = torch.argmax(preds, dim=1)  # This collapses the C (classes) dimension
+    # Apply threshold to sigmoid predictions to convert to binary class labels
+    preds = preds > threshold  # This creates a binary tensor of 0's and 1's
 
-    ious = []
-    for cls in range(num_classes):
-        pred_inds = (preds == cls)
-        label_inds = (labels == cls)
-        intersection = (pred_inds & label_inds).float().sum()  # Logical AND
-        union = (pred_inds | label_inds).float().sum()         # Logical OR
-        
-        if union == 0:
-            ious.append(float('nan'))  # No presence of class in both pred and label
-        else:
-            ious.append((intersection / union).item())
+    # Ensure labels are also boolean tensors if not already
+    labels = labels == pos_label
 
-    mean_iou = np.nanmean(ious)  # Compute the mean IoU, ignoring NaN values
-    return mean_iou
+    # Calculate intersection and union
+    intersection = (preds & labels).float().sum()  # Logical AND
+    union = (preds | labels).float().sum()         # Logical OR
+
+    if union == 0:
+        iou = float('nan')  # Handle case where there is no presence of the class in both pred and labels
+    else:
+        iou = (intersection / union).item()  # Convert to float if not zero
+
+    return iou
 

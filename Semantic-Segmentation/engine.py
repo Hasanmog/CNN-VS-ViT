@@ -2,7 +2,7 @@ import neptune
 import json
 import torch
 from torch.optim import Adam , lr_scheduler
-from torch.nn import CrossEntropyLoss
+from torch.nn import BCELoss
 from tqdm import tqdm
 from utils import calculate_iou
 
@@ -21,21 +21,21 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     )   
     model = model.to(device)
     optimizer = Adam(model.parameters(), lr=lr , weight_decay=1e-4)
-    loss_function = CrossEntropyLoss()
+    loss_function = BCELoss()
     
     if lr_schedule == "onecyclelr":
         lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
         
     elif lr_schedule == "multi_step_lr":
-        lr_drop_list = [4, 8]
-        lr_schedule = lr_scheduler.MultiStepLR(optimizer, milestones=lr_drop_list)
+        lr_drop_list = [5, 10 , 15 , 20 ,25 ,30 ,35, 40]
+        lr_schedule = lr_scheduler.MultiStepLR(optimizer, milestones=lr_drop_list , gamma = 0.2)
         
     elif lr_schedule == "step_lr":
         step_size = 10
         gamma = 0.5
         lr_schedule = lr_scheduler.StepLR(optimizer, step_size = step_size , gamma = gamma)
     else:
-        gamma = 0.95
+        gamma = 0.97
         lr_schedule = lr_scheduler.ExponentialLR(optimizer , gamma)
     
     start_epoch = 0
@@ -55,11 +55,14 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
             
             optimizer.zero_grad()
             outputs = model(images)
+            # print("outputs" , outputs)
+            # print("masks" , masks)
+            
             
             loss = loss_function(outputs, masks)
             iou = calculate_iou(preds=outputs , labels = masks)
             batch_loss += loss.item()
-            ious += iou.item()
+            ious += iou
             loss.backward()
             optimizer.step()
             
@@ -88,7 +91,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
                 loss = loss_function(outputs, masks)
                 iou = calculate_iou(preds=outputs , labels = masks)
                 validation_loss += loss.item()
-                ious += iou.item()
+                ious += iou
             
         val_loss = validation_loss / len(val_loader)
         val_iou = ious / len(val_loader)

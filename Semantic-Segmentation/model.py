@@ -36,9 +36,9 @@ class Segmentor(nn.Module):
             nn.Conv2d(64 , 64, kernel_size = 3), # (64, 490 , 490)
             nn.ReLU(),
             nn.BatchNorm2d(64),
-            nn.ConvTranspose2d(64 , 23 , kernel_size=1),
+            nn.ConvTranspose2d(64 , 1 , kernel_size=1),
             nn.Upsample(size = (512 , 512) , mode = 'bilinear' , align_corners=True),
-            nn.Softmax(dim = 1)
+            nn.Sigmoid()
         )
         
         
