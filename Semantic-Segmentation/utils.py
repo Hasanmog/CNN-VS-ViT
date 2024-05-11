@@ -63,9 +63,8 @@ def calculate_iou(preds, labels, threshold=0.5, pos_label=1):
     union = (preds | labels).float().sum()         # Logical OR
 
     if union == 0:
-        iou = float('nan')  # Handle case where there is no presence of the class in both pred and labels
+        return 1.0 if intersection == 0 else 0.0  # Handle case where there is no presence of the class in both pred and labels
     else:
-        iou = (intersection / union).item()  # Convert to float if not zero
-
-    return iou
+        iou = intersection / union
+        return iou.item()
 

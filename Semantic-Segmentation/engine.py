@@ -7,7 +7,7 @@ from tqdm import tqdm
 from utils import calculate_iou
 
 
-def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_dir , device , neptune_config):
+def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_dir ,device , neptune_config , resume_checkpoint = None):
 
     with open(neptune_config) as config_file:
             config = json.load(config_file)
@@ -17,11 +17,21 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     run = neptune.init_run(
                     project=project,  # specify your project name here
                     api_token= api_token,
-                    #with_id = 'VLMEO-1048'
-    )   
+                    #with_id = 'SOL-91'
+    )
     model = model.to(device)
     optimizer = Adam(model.parameters(), lr=lr , weight_decay=1e-4)
     loss_function = BCELoss()
+    if resume_checkpoint:   
+        checkpoint = torch.load(resume_checkpoint)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # lr_schedule.load_state_dict(checkpoint['lr_schedule_state_dict'])
+        epochs = checkpoint['epoch']
+        for g in optimizer.param_groups:
+            g['lr'] = lr
+        print("Resuming from checkpoint")
+    
     
     if lr_schedule == "onecyclelr":
         lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
