@@ -1,10 +1,14 @@
 import neptune
 import json
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 from torch.optim import Adam , lr_scheduler
-from torch.nn import BCELoss
+from torch.nn.functional import binary_cross_entropy_with_logits
 from tqdm import tqdm
 from utils import calculate_iou
+from torch.cuda.amp import GradScaler, autocast
 
 
 def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_dir ,device , neptune_config , resume_checkpoint = None):
@@ -21,7 +25,6 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     )
     model = model.to(device)
     optimizer = Adam(model.parameters(), lr=lr , weight_decay=1e-4)
-    loss_function = BCELoss()
     if resume_checkpoint:   
         checkpoint = torch.load(resume_checkpoint)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -47,68 +50,89 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     else:
         gamma = 0.97
         lr_schedule = lr_scheduler.ExponentialLR(optimizer , gamma)
-    
+        
+    scaler = GradScaler()
+
     start_epoch = 0
     best = float('inf')
     for epoch in tqdm(range(start_epoch , epochs) , desc = "training"):    
         print(f"Epoch : {epoch}")
         model.train(True)
         batch_loss = 0.0
-        ious = 0.0
+        ious_3 = 0.0
+        ious_5 = 0.0
+        ious_7 = 0.0
         train_iou = 0.0
         train_loss = 0.0
         
         for i , batch in enumerate(train_loader):
             images , masks = batch
             images = images.to(device)
+            masks = masks.float()
             masks = masks.to(device)
+            optimizer.zero_grad()  # Reset gradients to zero for new mini-batch
+
+            outputs = model(images)  # Forward pass
+            loss = binary_cross_entropy_with_logits(outputs, masks)  # Compute loss
             
-            optimizer.zero_grad()
-            outputs = model(images)
-            # print("outputs" , outputs)
-            # print("masks" , masks)
-            
-            
-            loss = loss_function(outputs, masks)
-            iou = calculate_iou(preds=outputs , labels = masks)
+            iou_3 , iou_5 , iou_7 = calculate_iou(preds=outputs, labels=masks)
             batch_loss += loss.item()
-            ious += iou
-            loss.backward()
-            optimizer.step()
+            ious_3 += iou_3
+            ious_5 += iou_5
+            ious_7 += iou_7
+            
+            loss.backward()  # Backpropagation
+            optimizer.step()  # Update weights
             
         lr_schedule.step()
         train_loss = batch_loss / len(train_loader)
-        train_iou = ious / len(train_loader)
+        train_iou_3 = ious_3 / len(train_loader)
+        train_iou_5 = ious_5 / len(train_loader)    
+        train_iou_7 = ious_7 / len(train_loader)
         run["train loss"].log(train_loss)
-        run["train_iou"].log(train_iou)
+        run["train IoU@0.3"].log(train_iou_3)
+        run["train IoU@0.5"].log(train_iou_5)
+        run["train IoU@0.75"].log(train_iou_7)
         current_lr = optimizer.param_groups[0]['lr']
         run['lr'].log(current_lr)
         print(f"train_loss-------------------------------->{train_loss}")
-        print(f"train_IoU-------------------------------->{train_iou}")
+        print(f"train_IoU @0.3 -------------------------------->{train_iou_3}")
+        print(f"train_IoU @0.5 -------------------------------->{train_iou_5}")
+        print(f"train_IoU @0.75 -------------------------------->{train_iou_7}")
         
         
         model.eval()
         ious = 0.0
         validation_loss = 0.0
         val_loss =0.0
-        val_iou = 0.0
+        val_iou_3 = 0.0
+        val_iou_5 = 0.0
+        val_iou_7 = 0.0
         for i , batch in enumerate(val_loader):
             images , masks = batch
             images = images.to(device)
             masks = masks.to(device)
-            with torch.no_grad():
+            with torch.no_grad(): #, autocast():
                 outputs = model(images)
-                loss = loss_function(outputs, masks)
-                iou = calculate_iou(preds=outputs , labels = masks)
+                loss = binary_cross_entropy_with_logits(outputs, masks)
+                iou_3 , iou_5 , iou_7 = calculate_iou(preds=outputs , labels = masks)
                 validation_loss += loss.item()
-                ious += iou
+                val_iou_3 += iou_3
+                val_iou_5 += iou_5
+                val_iou_7 += iou_7
             
         val_loss = validation_loss / len(val_loader)
-        val_iou = ious / len(val_loader)
+        val_3 = val_iou_3/ len(val_loader)
+        val_5 = val_iou_5/ len(val_loader)
+        val_7 = val_iou_7/ len(val_loader)
         run["validation loss"].log(val_loss)
-        run["validation IoU"].log(val_iou)
+        run["Val IoU@0.3"].log(val_3)
+        run["Val IoU@0.5"].log(val_5)
+        run["Val IoU@0.75"].log(val_7)
         print(f"val_loss-------------------------------->{val_loss}")
-        print(f"val_IoU-------------------------------->{val_iou}")
+        print(f"val_IoU @0.3 -------------------------------->{val_iou_3}")
+        print(f"val_IoU @0.5 -------------------------------->{val_iou_5}")
+        print(f"val_IoU @0.75 -------------------------------->{val_iou_7}")
         
         if val_loss < best :  
             torch.save({
@@ -119,11 +143,10 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
                     'train_loss': train_loss,
                     'train_iou' : train_iou , 
                     'val_loss': val_loss , 
-                    'val_iou' : val_iou ,
                 }, out_dir )  
             best = val_loss
            
-    return train_loss , train_iou , val_loss , val_iou 
+    return train_loss , val_loss
 
 
 # def test():

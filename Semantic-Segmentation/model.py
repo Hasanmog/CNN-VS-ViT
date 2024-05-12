@@ -1,5 +1,6 @@
 import torch.nn as nn
-
+import torch
+from Attentions import Self_Attention
 
 class Segmentor(nn.Module):
     def __init__(self , num_classes = 23):
@@ -24,7 +25,8 @@ class Segmentor(nn.Module):
         
         self.bottleneck = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size = 3 , stride = 2), # (256, 123 , 123)
-            nn.ReLU()
+            nn.ReLU(),
+            Self_Attention(d_model = 256),
         )
         
         self.decoder = nn.Sequential(
@@ -38,7 +40,6 @@ class Segmentor(nn.Module):
             nn.BatchNorm2d(64),
             nn.ConvTranspose2d(64 , 1 , kernel_size=1),
             nn.Upsample(size = (512 , 512) , mode = 'bilinear' , align_corners=True),
-            nn.Sigmoid()
         )
         
         
@@ -46,5 +47,7 @@ class Segmentor(nn.Module):
         x = self.encoder(x)
         x = self.bottleneck(x)
         x = self.decoder(x)
+        x = torch.clamp(x, min=-10, max=10)
+
         
         return x

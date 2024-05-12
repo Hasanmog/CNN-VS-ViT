@@ -36,35 +36,42 @@ def dataset_split(img_dir, masks_dir):
     return sets, masks_sets
 
 
-def calculate_iou(preds, labels, threshold=0.5, pos_label=1):
+def calculate_iou(preds, labels, pos_label=1):
     """
     Calculate the Intersection over Union (IoU) for a single class segmentation
-    where predictions are given as sigmoid outputs.
+    where predictions are given as sigmoid outputs at specific thresholds (0.3, 0.5, 0.75).
 
     Args:
-        preds (torch.Tensor): Sigmoid predictions of shape (N, C, H, W) where
-                              N is the batch size, C is the number of classes (typically 2 for binary classification),
+        preds (torch.Tensor): Logits output from the model (N, C, H, W), where
+                              N is the batch size, C is the number of classes,
                               H and W are the height and width of the image.
         labels (torch.Tensor): Ground truth labels of shape (N, H, W), with values 0 and 1.
-        threshold (float): Threshold to convert sigmoid outputs to binary class labels.
         pos_label (int): The label of the positive class (default is 1).
 
     Returns:
-        float: IoU for the positive class.
+        tuple: IoU scores for the positive class at thresholds 0.3, 0.5, and 0.75.
     """
-    # Apply threshold to sigmoid predictions to convert to binary class labels
-    preds = preds > threshold  # This creates a binary tensor of 0's and 1's
+    thresholds = [0.3, 0.5, 0.75]
+    iou_scores = []
+    probs = torch.sigmoid(preds)  # Convert logits to probabilities
 
-    # Ensure labels are also boolean tensors if not already
-    labels = labels == pos_label
+    for threshold in thresholds:
+        # Apply threshold to convert probabilities to binary predictions
+        preds_binary = (probs > threshold).float()  # Use float for binary conversion
 
-    # Calculate intersection and union
-    intersection = (preds & labels).float().sum()  # Logical AND
-    union = (preds | labels).float().sum()         # Logical OR
+        # Ensure labels are also boolean tensors if not already
+        labels_binary = (labels == pos_label).float()  # Use float here as well
 
-    if union == 0:
-        return 1.0 if intersection == 0 else 0.0  # Handle case where there is no presence of the class in both pred and labels
-    else:
-        iou = intersection / union
-        return iou.item()
+        # Calculate intersection and union
+        intersection = (preds_binary * labels_binary).sum()  # Use element-wise multiplication
+        union = preds_binary.sum() + labels_binary.sum() - intersection
+
+        # Compute IoU or handle the case with no presence of the class
+        if union == 0:
+            iou_scores.append(1.0 if intersection == 0 else 0.0)
+        else:
+            iou_scores.append((intersection / union).item())
+
+    # Unpack the list to return individual IoU scores
+    return tuple(iou_scores)
 
