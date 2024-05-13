@@ -130,9 +130,9 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
         run["Val IoU@0.5"].log(val_5)
         run["Val IoU@0.75"].log(val_7)
         print(f"val_loss-------------------------------->{val_loss}")
-        print(f"val_IoU @0.3 -------------------------------->{val_iou_3}")
-        print(f"val_IoU @0.5 -------------------------------->{val_iou_5}")
-        print(f"val_IoU @0.75 -------------------------------->{val_iou_7}")
+        print(f"val_IoU @0.3 -------------------------------->{val_3}")
+        print(f"val_IoU @0.5 -------------------------------->{val_5}")
+        print(f"val_IoU @0.75 -------------------------------->{val_7}")
         
         if val_loss < best :  
             torch.save({
@@ -149,5 +149,39 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     return train_loss , val_loss
 
 
-# def test():
+def test(model , test_loader , checkpoint:str , device):
+    
+    checkpoint = torch.load(checkpoint)
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    model.to(device)
+    model.eval()
+    
+    test_loss = 0.0
+    test_ious_3 = 0.0
+    test_ious_5 = 0.0
+    test_ious_7 = 0.0
+    
+    for i , batch in tqdm(enumerate(test_loader) , desc = "Testing progress"):
+        images , masks = batch
+        images = images.to(device)
+        masks = masks.to(device)
+        
+        
+        with torch.no_grad():
+            outputs = model(images)
+            loss = binary_cross_entropy_with_logits(outputs, masks)
+            iou_3 , iou_5 , iou_7 = calculate_iou(preds=outputs , labels = masks)
+            test_ious_3 += iou_3
+            test_ious_5 += iou_5
+            test_ious_7 += iou_7
+            test_loss += loss.item()
+            
+    print(f"Test Loss -------------> {test_loss/len(test_loader)}")
+    print(f"Test IoU@0.3 -------------> {test_ious_3/len(test_loader)}")
+    print(f"Test IoU@0.5 -------------> {test_ious_5/len(test_loader)}")
+    print(f"Test IoU@0.75 -------------> {test_ious_7/len(test_loader)}")
+    
+    return test_loss/len(test_loader) , test_ious_3/len(test_loader) , test_ious_5/len(test_loader) , test_ious_7/len(test_loader)
+    
     
