@@ -225,3 +225,51 @@ def test(model , test_loader , checkpoint:str , device , output_dir:str):
             f.write('\n')
     
     return results
+
+
+def matching(model, loader, checkpoint, device):
+    checkpoint = torch.load(checkpoint)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model = model.to(device)
+    model.eval()
+    ious = 0.0
+    fs = 0.0
+    tps = 0.0
+    total_matches = 0  # total number of matched pairs across all batches
+
+    for i, batch in tqdm(enumerate(loader), desc="Matching Progress"):
+        images, masks = batch
+        images = images.to(device)
+        
+        with torch.no_grad():
+            outputs = model(images)
+            outputs = torch.sigmoid(outputs).to('cpu')
+            
+            # Iterate through each sample in the batch
+            for output, mask in zip(outputs, masks):
+                # Convert output to binary mask
+                binary_output = (output > 0.5).float()
+                
+                # Iterate through each predicted mask (assuming the channel dimension contains individual masks)
+                for pred_mask in binary_output:
+                    matching_algo = matching_algorithm(pred_mask.unsqueeze(0), mask.unsqueeze(0))
+                    iou_list, f1_scores, tp_pred_indices, tp_gt_indices, fp_indices, fn_indices = matching_algo.matching()
+                    num_matches = len(iou_list)  # number of matched pairs in this batch
+                    iou = sum(iou_list) / num_matches if num_matches > 0 else 0
+                    f1 = sum(f1_scores) / num_matches if num_matches > 0 else 0
+                    tp_iou_list, avg_tp_iou = matching_algo.tp_iou(tp_pred_indices, tp_gt_indices)
+
+                    ious += iou * num_matches
+                    fs += f1 * num_matches
+                    tps += avg_tp_iou * num_matches
+                    total_matches += num_matches
+
+    final_iou = ious / total_matches if total_matches > 0 else 0
+    final_f1 = fs / total_matches if total_matches > 0 else 0
+    final_tp_iou = tps / total_matches if total_matches > 0 else 0
+    
+    print(f"Matching IoU -------------> {final_iou}")
+    print(f"Matching F1 -------------> {final_f1}")
+    print(f"Matching TP IoU -------------> {final_tp_iou}")
+    
+    return final_iou, final_f1, final_tp_iou

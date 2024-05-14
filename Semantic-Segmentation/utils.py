@@ -199,6 +199,14 @@ def dice_loss(predicted_masks, gt_masks, smooth=1e-6):
 
 
 def IoU(maskA, maskB):
+    # Ensure the masks are on cpu
+    maskA = maskA.cpu()
+    maskB = maskB.cpu()
+
+    # Convert the masks to numpy arrays
+    maskA = maskA.numpy()
+    maskB = maskB.numpy()
+
     intersection = np.logical_and(maskA, maskB)
     union = np.logical_or(maskA, maskB)
     iou = np.sum(intersection) / np.sum(union)
@@ -274,6 +282,6 @@ class matching_algorithm:
         if len(tp_iou_list) > 0:
             avg_tp_iou = np.mean(tp_iou_list)
         else:
-            avg_tp_iou = None
+            avg_tp_iou = 0
         return tp_iou_list, avg_tp_iou
 
