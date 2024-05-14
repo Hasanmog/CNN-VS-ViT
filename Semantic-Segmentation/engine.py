@@ -1,13 +1,14 @@
 import neptune
 import json
 import torch
+import os
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim import Adam , lr_scheduler
 from torch.nn.functional import binary_cross_entropy_with_logits
 from tqdm import tqdm
-from utils import calculate_iou
+from utils import iou , calc_f1_score ,dice_loss , matching_algorithm
 from torch.cuda.amp import GradScaler, autocast
 
 
@@ -75,7 +76,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
             outputs = model(images)  # Forward pass
             loss = binary_cross_entropy_with_logits(outputs, masks)  # Compute loss
             
-            iou_3 , iou_5 , iou_7 = calculate_iou(preds=outputs, labels=masks)
+            iou_3 , iou_5 , iou_7 = iou(preds=outputs, labels=masks)
             batch_loss += loss.item()
             ious_3 += iou_3
             ious_5 += iou_5
@@ -115,7 +116,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
             with torch.no_grad(): #, autocast():
                 outputs = model(images)
                 loss = binary_cross_entropy_with_logits(outputs, masks)
-                iou_3 , iou_5 , iou_7 = calculate_iou(preds=outputs , labels = masks)
+                iou_3 , iou_5 , iou_7 = iou(preds=outputs , labels = masks)
                 validation_loss += loss.item()
                 val_iou_3 += iou_3
                 val_iou_5 += iou_5
@@ -149,7 +150,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     return train_loss , val_loss
 
 
-def test(model , test_loader , checkpoint:str , device):
+def test(model , test_loader , checkpoint:str , device , output_dir:str):
     
     checkpoint = torch.load(checkpoint)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -161,7 +162,10 @@ def test(model , test_loader , checkpoint:str , device):
     test_ious_3 = 0.0
     test_ious_5 = 0.0
     test_ious_7 = 0.0
-    
+    fs = 0.0
+    precisions = 0.0
+    recalls = 0.0
+    dices = 0.0
     for i , batch in tqdm(enumerate(test_loader) , desc = "Testing progress"):
         images , masks = batch
         images = images.to(device)
@@ -171,17 +175,53 @@ def test(model , test_loader , checkpoint:str , device):
         with torch.no_grad():
             outputs = model(images)
             loss = binary_cross_entropy_with_logits(outputs, masks)
-            iou_3 , iou_5 , iou_7 = calculate_iou(preds=outputs , labels = masks)
+            iou_3 , iou_5 , iou_7 = iou(preds=outputs , labels = masks)
             test_ious_3 += iou_3
             test_ious_5 += iou_5
             test_ious_7 += iou_7
             test_loss += loss.item()
+            precision, recall, f1 = calc_f1_score(predicted_masks=outputs , gt_masks=masks)
+            dice = dice_loss(predicted_masks=outputs , gt_masks=masks)
+            dices += dice.item()
+            fs += f1
+            precisions += precision
+            recalls += recall
             
-    print(f"Test Loss -------------> {test_loss/len(test_loader)}")
-    print(f"Test IoU@0.3 -------------> {test_ious_3/len(test_loader)}")
-    print(f"Test IoU@0.5 -------------> {test_ious_5/len(test_loader)}")
-    print(f"Test IoU@0.75 -------------> {test_ious_7/len(test_loader)}")
+            
+            
+    final_loss =  test_loss/len(test_loader)
+    final_iou_3 = test_ious_3/len(test_loader)
+    final_iou_5 = test_ious_5 / len(test_loader)
+    final_iou_7 = test_ious_7 / len(test_loader)
+    final_precision = precisions/len(test_loader)
+    final_recall = recalls/len(test_loader)
+    final_f1 = fs/len(test_loader)
+    final_dice = dices/len(test_loader)      
+    print(f"Test Loss -------------> {final_loss}")
+    print(f"Test IoU@0.3 -------------> {final_iou_3}")
+    print(f"Test IoU@0.5 -------------> {final_iou_5}")
+    print(f"Test IoU@0.75 -------------> {final_iou_7}")
+    print(f"Test Precision Score -------------> {final_precision}")
+    print(f"Test Recall Score -------------> {final_recall}")
+    print(f"Test F1 Score -------------> {final_f1}")
+    print(f"Test Dice Loss -------------> {final_dice}")
     
-    return test_loss/len(test_loader) , test_ious_3/len(test_loader) , test_ious_5/len(test_loader) , test_ious_7/len(test_loader)
+    results = {
+        "Test Loss": final_loss,
+        "Test IoU@0.3": final_iou_3,
+        "Test IoU@0.5": final_iou_5,
+        "Test IoU@0.75": final_iou_7,
+        "Test Precision": final_iou_5,
+        "Test Recall": final_iou_7,
+        "Test F1": final_f1,
+        "Test Dice": final_dice
+    }
+
+    out = os.path.join(output_dir, "results.json")
     
+    with open(out, 'w') as f:
+        for key, value in results.items():
+            json.dump({key: value}, f)
+            f.write('\n')
     
+    return results
