@@ -4,8 +4,11 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
-from skimage.morphology import remove_small_objects, remove_small_holes
+from skimage.morphology import remove_small_objects, remove_small_holes 
+from skimage.segmentation import watershed
 from sklearn.metrics import precision_score, recall_score, f1_score
+from scipy import ndimage
+from skimage.feature import peak_local_max
 
 def dataset_split(img_dir, masks_dir):
     # List all image files
@@ -40,13 +43,6 @@ def dataset_split(img_dir, masks_dir):
 
 
 def postprocess(outputs, threshold=0.5, min_size=500, smoothing=True):
-    """
-    used to clean the output return from the model
-    
-    Args:
-    outputs : model output after sigmoid
-    """
-    
     binary_masks = (outputs > threshold).float().cpu().numpy().squeeze()
 
     if binary_masks.ndim == 3:
@@ -56,71 +52,71 @@ def postprocess(outputs, threshold=0.5, min_size=500, smoothing=True):
 
     processed_masks = []
     for binary_mask_np in binary_masks:
-        # Morphological closing to fill small holes
-        kernel = np.ones((5, 5), np.uint8)
-        closed_mask = cv2.morphologyEx(binary_mask_np, cv2.MORPH_CLOSE, kernel, iterations=2)
-        
-        # Morphological opening to remove noise
-        opened_mask = cv2.morphologyEx(closed_mask, cv2.MORPH_OPEN, kernel, iterations=2)
-        
-        # Remove small objects
-        cleaned_mask = remove_small_objects(opened_mask.astype(bool), min_size=min_size)
-        cleaned_mask = remove_small_holes(cleaned_mask, area_threshold=min_size)
-        cleaned_mask = cleaned_mask.astype(np.uint8)
+        # Morphological operations to clean up the mask
+        kernel = np.ones((3, 3), np.uint8)  # Smaller kernel
+        closed_mask = cv2.morphologyEx(binary_mask_np, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        # Apply bilateral filter for edge-preserving smoothing
-        if smoothing:
-            cleaned_mask = cv2.bilateralFilter(cleaned_mask.astype(np.float32), d=9, sigmaColor=75, sigmaSpace=75)
-            _, cleaned_mask = cv2.threshold(cleaned_mask, 0.5, 1, cv2.THRESH_BINARY)
-        
-        processed_masks.append(cleaned_mask)
+        # Ensure labels are integer type
+        labels_mask = closed_mask.astype(np.int32)
+
+        # Apply the watershed algorithm
+        distance = ndimage.distance_transform_edt(closed_mask)
+        local_maxi = peak_local_max(distance, min_distance=1, exclude_border=False, footprint=np.ones((3, 3)), labels=labels_mask)
+
+        # Convert peak locations to a boolean mask
+        peaks = np.zeros_like(distance, dtype=bool)
+        peaks[local_maxi[:, 0], local_maxi[:, 1]] = True
+
+        markers = ndimage.label(peaks)[0]
+        labels = watershed(-distance, markers, mask=closed_mask)
+
+        # Convert labels to binary masks and remove small objects
+        for label in np.unique(labels):
+            if label == 0:
+                continue
+            label_mask = (labels == label).astype(np.uint8)
+            label_mask = remove_small_objects(label_mask.astype(bool), min_size=min_size)
+            label_mask = remove_small_holes(label_mask, area_threshold=min_size)
+            label_mask = label_mask.astype(np.uint8)
+
+            # Apply bilateral filter for edge-preserving smoothing
+            if smoothing:
+                label_mask = cv2.bilateralFilter(label_mask.astype(np.float32), d=5, sigmaColor=50, sigmaSpace=50)
+                _, label_mask = cv2.threshold(label_mask, 0.5, 1, cv2.THRESH_BINARY)
+
+            processed_masks.append(label_mask)
     
     return processed_masks
 
-def plot(model, images, gt_masks,  device , checkpoint = None,):
-    """
-    This function is used to plot a batch of images, ground truth masks and the predictions of a model
-    Args:
-    model : Segmentation model
-    image : Batch of images from the dataloader
-    gt_masks : Batch of ground truth masks from the dataloader
-    checkpoint : optional , path to the model checkpoint to load
-    device : device to use for computations
-    Returns:
-    plot showing images vs gt_masks vs pred_masks 
-    """
-    if checkpoint:
-        checkpoint = torch.load(checkpoint)
-        model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(device)
+def plot(model, images, gt_masks, checkpoint, device):
+    # Load model weights
+    model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
+    model.to(device)
     model.eval()
-    
+
     with torch.no_grad():
         outputs = model(images.to(device))
-        outputs = torch.sigmoid(outputs)
-    outputs = postprocess(outputs)
+        outputs = torch.sigmoid(outputs)  # Assuming binary classification (sigmoid output)
 
-    columns = 3
-    rows = len(outputs)
-    fig, axs = plt.subplots(nrows=rows, ncols=columns, figsize=(15, rows * 5))
-    plt.subplots_adjust(wspace=0, hspace=0.1)
+    images = images.cpu().numpy()
+    gt_masks = gt_masks.squeeze(1).cpu().numpy()  # Remove channel dim if it's 1
+    predicted_masks = (outputs > 0.5).float().cpu().numpy().squeeze(1)  # Thresholding to create binary mask
+
+    num_images = images.shape[0]
+    fig, axs = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
     
-    for i, (img, gt_mask, out) in enumerate(zip(images, gt_masks, outputs)):
-        img = img.permute(1, 2, 0).numpy()
-        gt_mask = gt_mask.squeeze().numpy()
-         
-        axs[i][0].imshow(img)
-        axs[i][0].set_title("Image")
-        axs[i][0].set_axis_off()
-            
-        axs[i][1].imshow(gt_mask, cmap='viridis')
-        axs[i][1].set_title("Ground Truth")
-        axs[i][1].set_axis_off()
-            
-        axs[i][2].imshow(out, cmap='viridis')
-        axs[i][2].set_title("Predicted mask")
-        axs[i][2].set_axis_off()
-            
+    for idx in range(num_images):
+        axs[idx, 0].imshow(np.transpose(images[idx], (1, 2, 0)))  # Convert from CHW to HWC format
+        axs[idx, 0].set_title('Input Image')
+        axs[idx, 1].imshow(gt_masks[idx], cmap='viridis')
+        axs[idx, 1].set_title('Ground Truth Mask')
+        axs[idx, 2].imshow(predicted_masks[idx], cmap='viridis')
+        axs[idx, 2].set_title('Predicted Mask')
+
+        for ax in axs[idx]:
+            ax.axis('off')
+    
+    plt.tight_layout()
     plt.show()
     
     

@@ -15,48 +15,45 @@ from torch.cuda.amp import GradScaler, autocast
 def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_dir ,device , neptune_config , resume_checkpoint = None):
 
     with open(neptune_config) as config_file:
-            config = json.load(config_file)
-            api_token = config.get('api_token')
-            project = config.get('project')
-        
+        config = json.load(config_file)
+        api_token = config.get('api_token')
+        project = config.get('project')
+
     run = neptune.init_run(
-                    project=project,  # specify your project name here
-                    api_token= api_token,
-                    #with_id = 'SOL-91'
+        project=project,  # specify your project name here
+        api_token=api_token,
+        # with_id='SOL-91'  # Uncomment if you need to specify a particular run ID
     )
+
     model = model.to(device)
-    optimizer = Adam(model.parameters(), lr=lr , weight_decay=1e-4)
-    if resume_checkpoint:   
-        checkpoint = torch.load(resume_checkpoint)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        # lr_schedule.load_state_dict(checkpoint['lr_schedule_state_dict'])
-        epochs = checkpoint['epoch']
-        for g in optimizer.param_groups:
-            g['lr'] = lr
-        print("Resuming from checkpoint")
-    
-    
-    if lr_schedule == "onecyclelr":
-        lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
-        
-    elif lr_schedule == "multi_step_lr":
-        lr_drop_list = [5, 10 , 15 , 20 ,25 ,30 ,35, 40]
-        lr_schedule = lr_scheduler.MultiStepLR(optimizer, milestones=lr_drop_list , gamma = 0.2)
-        
-    elif lr_schedule == "step_lr":
-        step_size = 10
-        gamma = 0.5
-        lr_schedule = lr_scheduler.StepLR(optimizer, step_size = step_size , gamma = gamma)
-    else:
-        gamma = 0.97
-        lr_schedule = lr_scheduler.ExponentialLR(optimizer , gamma)
-        
-    scaler = GradScaler()
+    optimizer = Adam(model.parameters(), lr=lr, weight_decay=1e-4)
 
     start_epoch = 0
     best = float('inf')
-    for epoch in tqdm(range(start_epoch , epochs) , desc = "training"):    
+
+    if resume_checkpoint:
+        checkpoint = torch.load(resume_checkpoint)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch']  # Resuming from next epoch
+        # Optionally set epoch count if continuing till a new fixed number
+        # epochs += start_epoch
+        for g in optimizer.param_groups:
+            g['lr'] = lr
+        print("Resuming from checkpoint")
+
+    # Initialize the learning rate scheduler based on user input
+    if lr_schedule == "onecyclelr":
+        lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
+    elif lr_schedule == "multi_step_lr":
+        lr_schedule = lr_scheduler.MultiStepLR(optimizer, milestones=[5, 10, 15, 20, 25, 30, 35, 40], gamma=0.2)
+    elif lr_schedule == "step_lr":
+        lr_schedule = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    else:
+        lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
+    scaler = GradScaler()
+    # Main training and validation loop
+    for epoch in tqdm(range(start_epoch, epochs), desc="Training"):    
         print(f"Epoch : {epoch}")
         model.train(True)
         batch_loss = 0.0
@@ -72,18 +69,20 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
             masks = masks.float()
             masks = masks.to(device)
             optimizer.zero_grad()  # Reset gradients to zero for new mini-batch
-
-            outputs = model(images)  # Forward pass
-            loss = binary_cross_entropy_with_logits(outputs, masks)  # Compute loss
-            
-            iou_3 , iou_5 , iou_7 = iou(preds=outputs, labels=masks)
-            batch_loss += loss.item()
-            ious_3 += iou_3
-            ious_5 += iou_5
-            ious_7 += iou_7
-            
-            loss.backward()  # Backpropagation
-            optimizer.step()  # Update weights
+            with autocast():
+                outputs = model(images)  # Forward pass
+                loss = binary_cross_entropy_with_logits(outputs, masks)  # Compute loss
+                    
+                iou_3 , iou_5 , iou_7 = iou(preds=outputs, labels=masks)
+                batch_loss += loss.item()
+                ious_3 += iou_3
+                ious_5 += iou_5
+                ious_7 += iou_7
+            # loss.backward()
+            # optimizer.step()   
+            scaler.scale(loss).backward()  # Backpropagation
+            scaler.step(optimizer)
+            scaler.update()
             
         lr_schedule.step()
         train_loss = batch_loss / len(train_loader)
@@ -113,7 +112,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
             images , masks = batch
             images = images.to(device)
             masks = masks.to(device)
-            with torch.no_grad(): #, autocast():
+            with torch.no_grad(), autocast():
                 outputs = model(images)
                 loss = binary_cross_entropy_with_logits(outputs, masks)
                 iou_3 , iou_5 , iou_7 = iou(preds=outputs , labels = masks)
@@ -135,22 +134,22 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
         print(f"val_IoU @0.5 -------------------------------->{val_5}")
         print(f"val_IoU @0.75 -------------------------------->{val_7}")
         
-        if val_loss < best :  
+        if val_loss < best:
+            checkpoint_path = os.path.join(out_dir, f'checkpoint_epoch_{epoch}.pth')
             torch.save({
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': lr_schedule.state_dict(),
-                    'train_loss': train_loss,
-                    'train_iou' : train_iou , 
-                    'val_loss': val_loss , 
-                }, out_dir )  
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': lr_schedule.state_dict(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+            }, checkpoint_path)
             best = val_loss
-           
-    return train_loss , val_loss
+
+    return train_loss, val_loss
 
 
-def test(model , test_loader , checkpoint:str , device , output_dir:str):
+def test(model , test_loader , checkpoint:str , device , output_dir:str , name:str):
     
     checkpoint = torch.load(checkpoint)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -217,7 +216,7 @@ def test(model , test_loader , checkpoint:str , device , output_dir:str):
         "Test Dice": final_dice
     }
 
-    out = os.path.join(output_dir, "results.json")
+    out = os.path.join(output_dir, f"{name}.json")
     
     with open(out, 'w') as f:
         for key, value in results.items():
