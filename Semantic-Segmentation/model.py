@@ -29,8 +29,16 @@ class Segmentor(nn.Module):
         
         self.bottleneck = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size = 3 , stride = 2), # (256, 123 , 123)
-            nn.ReLU(),
-            # Self_Attention(d_model = 256),
+            nn.BatchNorm2d(256),
+            nn.ELU(),
+            nn.Conv2d(256 , 512 , kernel_size = 1 , stride = 1), # (512, 123 , 123)
+            nn.BatchNorm2d(512),
+            nn.ELU(),
+            nn.Dropout(0.5),
+            # Self_Attention(d_model = 512),
+            nn.Conv2d(512 , 256 , kernel_size=1),
+            nn.BatchNorm2d(256),
+            nn.ELU(),
         )
         
         self.dec_layer1 = nn.Sequential(

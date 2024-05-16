@@ -135,7 +135,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
         print(f"val_IoU @0.75 -------------------------------->{val_7}")
         
         if val_loss < best:
-            checkpoint_path = os.path.join(out_dir, f'checkpoint_epoch_{epoch}.pth')
+            checkpoint_path = os.path.join(out_dir, f'best_checkpoint.pth')
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
@@ -149,7 +149,7 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
     return train_loss, val_loss
 
 
-def test(model , test_loader , checkpoint:str , device , output_dir:str , name:str):
+def test(model , test_loader , checkpoint:str , device , output_dir:str , name:str , postprocessing = True,):
     
     checkpoint = torch.load(checkpoint)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -177,11 +177,12 @@ def test(model , test_loader , checkpoint:str , device , output_dir:str , name:s
             outputs = torch.sigmoid(outputs)
             # Convert model outputs to numpy arrays, then post-process
             # outputs = postprocess(outputs)
-            postprocess = PostProcessing()
-            outputs = outputs.cpu().numpy()
-            outputs = postprocess.post_process_batch(outputs)
-            # outputs = postprocess.noise_filter(outputs , mina = 10)
-            outputs = torch.tensor(outputs)
+            if postprocessing:
+                postprocess = PostProcessing()
+                outputs = outputs.cpu().numpy()
+                outputs = postprocess.post_process_batch(outputs)
+                # outputs = postprocess.noise_filter(outputs , mina = 10)
+                outputs = torch.tensor(outputs)
             # print(outputs.shape , masks.shape)
             iou_3 , iou_5 , iou_7 = iou(preds=outputs , labels = masks)
             test_ious_3 += iou_3
@@ -227,7 +228,11 @@ def test(model , test_loader , checkpoint:str , device , output_dir:str , name:s
 
     out = os.path.join(output_dir, f"{name}.json")
     
-    with open(out, 'w') as f:
+    with open(out, 'a') as f:
+        if postprocessing:
+            json.dump("with postprocessing" , f)
+        else: 
+            json.dump("without postprocessing" , f)
         for key, value in results.items():
             json.dump({key: value}, f)
             f.write('\n')

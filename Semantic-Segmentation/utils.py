@@ -101,7 +101,7 @@ def postprocess(outputs, threshold=0.5, min_size=500, smoothing=True):
     # Convert the list of numpy arrays to a single numpy array, then to a tensor
     return torch.from_numpy(np.array(processed_masks))
 
-def plot(model, images, gt_masks, checkpoint, device):
+def plot(model, images, gt_masks, checkpoint, device , with_postprocess = True):
     # Load model weights
     model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
     model.to(device)
@@ -112,9 +112,10 @@ def plot(model, images, gt_masks, checkpoint, device):
         outputs = torch.sigmoid(outputs)  # Assuming binary classification (sigmoid output)
             # Convert model outputs to numpy arrays, then post-process
             # outputs = postprocess(outputs)
-        postprocess = PostProcessing()
-        outputs = outputs.cpu().numpy()
-        outputs = postprocess.post_process_batch(outputs)
+        if with_postprocess:
+            postprocess = PostProcessing()
+            outputs = outputs.cpu().numpy()
+            outputs = postprocess.post_process_batch(outputs)
             # outputs = postprocess.noise_filter(outputs , mina = 10)
         outputs = torch.tensor(outputs)
     print("outputs shape", outputs.shape)   
@@ -156,8 +157,8 @@ def iou(preds, labels, pos_label=1):
     Returns:
         tuple: IoU scores for the positive class at thresholds 0.3, 0.5, and 0.75.
     """
-    preds = preds.cpu().numpy()
-    labels = labels.cpu().numpy()
+    preds = preds.detach().cpu().numpy()
+    labels = labels.detach().cpu().numpy()
     thresholds = [0.3, 0.5, 0.75]
     iou_scores = []
     for threshold in thresholds:
