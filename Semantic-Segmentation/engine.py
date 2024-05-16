@@ -181,7 +181,7 @@ def test(model , test_loader , checkpoint:str , device , output_dir:str , name:s
                 postprocess = PostProcessing()
                 outputs = outputs.cpu().numpy()
                 outputs = postprocess.post_process_batch(outputs)
-                # outputs = postprocess.noise_filter(outputs , mina = 10)
+                outputs = postprocess.noise_filter(outputs , mina = 10)
                 outputs = torch.tensor(outputs)
             # print(outputs.shape , masks.shape)
             iou_3 , iou_5 , iou_7 = iou(preds=outputs , labels = masks)

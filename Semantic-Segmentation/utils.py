@@ -116,7 +116,7 @@ def plot(model, images, gt_masks, checkpoint, device , with_postprocess = True):
             postprocess = PostProcessing()
             outputs = outputs.cpu().numpy()
             outputs = postprocess.post_process_batch(outputs)
-            # outputs = postprocess.noise_filter(outputs , mina = 10)
+            outputs = postprocess.noise_filter(outputs , mina = 10)
         outputs = torch.tensor(outputs)
     print("outputs shape", outputs.shape)   
     images = images.cpu().numpy()
