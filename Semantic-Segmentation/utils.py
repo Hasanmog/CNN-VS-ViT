@@ -9,6 +9,16 @@ from skimage.segmentation import watershed
 from sklearn.metrics import precision_score, recall_score, f1_score
 from scipy import ndimage
 from skimage.feature import peak_local_max
+import numpy as np
+import pandas as pd
+from skimage.morphology import dilation,square,erosion
+from skimage.segmentation import watershed
+from skimage.measure import label
+from PIL import Image,ImageDraw
+import pandas as pd
+from shapely.geometry import shape
+from shapely.wkt import dumps
+from shapely.ops import unary_union
 
 def dataset_split(img_dir, masks_dir):
     # List all image files
@@ -43,11 +53,14 @@ def dataset_split(img_dir, masks_dir):
 
 
 def postprocess(outputs, threshold=0.5, min_size=500, smoothing=True):
-    binary_masks = (outputs > threshold).float().cpu().numpy().squeeze()
+    # Convert tensor to numpy array
+    outputs = outputs.cpu().numpy()
 
-    if binary_masks.ndim == 3:
-        binary_masks = [binary_masks[i] for i in range(binary_masks.shape[0])]
-    elif binary_masks.ndim == 2:
+    # Direct operation on numpy array
+    binary_masks = np.squeeze((outputs > threshold).astype(np.float32))
+
+    # No need to convert to list if dimension is 3
+    if binary_masks.ndim == 2:
         binary_masks = [binary_masks]
 
     processed_masks = []
@@ -77,7 +90,6 @@ def postprocess(outputs, threshold=0.5, min_size=500, smoothing=True):
             label_mask = (labels == label).astype(np.uint8)
             label_mask = remove_small_objects(label_mask.astype(bool), min_size=min_size)
             label_mask = remove_small_holes(label_mask, area_threshold=min_size)
-            label_mask = label_mask.astype(np.uint8)
 
             # Apply bilateral filter for edge-preserving smoothing
             if smoothing:
@@ -86,7 +98,8 @@ def postprocess(outputs, threshold=0.5, min_size=500, smoothing=True):
 
             processed_masks.append(label_mask)
     
-    return processed_masks
+    # Convert the list of numpy arrays to a single numpy array, then to a tensor
+    return torch.from_numpy(np.array(processed_masks))
 
 def plot(model, images, gt_masks, checkpoint, device):
     # Load model weights
@@ -97,10 +110,18 @@ def plot(model, images, gt_masks, checkpoint, device):
     with torch.no_grad():
         outputs = model(images.to(device))
         outputs = torch.sigmoid(outputs)  # Assuming binary classification (sigmoid output)
-
+            # Convert model outputs to numpy arrays, then post-process
+            # outputs = postprocess(outputs)
+        postprocess = PostProcessing()
+        outputs = outputs.cpu().numpy()
+        outputs = postprocess.post_process_batch(outputs)
+            # outputs = postprocess.noise_filter(outputs , mina = 10)
+        outputs = torch.tensor(outputs)
+    print("outputs shape", outputs.shape)   
     images = images.cpu().numpy()
     gt_masks = gt_masks.squeeze(1).cpu().numpy()  # Remove channel dim if it's 1
-    predicted_masks = (outputs > 0.5).float().cpu().numpy().squeeze(1)  # Thresholding to create binary mask
+    outputs = outputs.squeeze(0)
+    predicted_masks = outputs.permute(0 , 2,3,1).cpu().numpy()  # Thresholding to create binary mask
 
     num_images = images.shape[0]
     fig, axs = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
@@ -135,26 +156,23 @@ def iou(preds, labels, pos_label=1):
     Returns:
         tuple: IoU scores for the positive class at thresholds 0.3, 0.5, and 0.75.
     """
+    preds = preds.cpu().numpy()
+    labels = labels.cpu().numpy()
     thresholds = [0.3, 0.5, 0.75]
     iou_scores = []
-    probs = torch.sigmoid(preds)  # Convert logits to probabilities
-
     for threshold in thresholds:
-        # Apply threshold to convert probabilities to binary predictions
-        preds_binary = (probs > threshold).float()  # Use float for binary conversion
-
-        # Ensure labels are also boolean tensors if not already
-        labels_binary = (labels == pos_label).float()  # Use float here as well
+        preds_binary = np.array([(pred > threshold).astype(np.float32) for pred in preds])
+        labels_binary = np.array([(label == pos_label).astype(np.float32) for label in labels])
 
         # Calculate intersection and union
-        intersection = (preds_binary * labels_binary).sum()  # Use element-wise multiplication
-        union = preds_binary.sum() + labels_binary.sum() - intersection
+        intersection = np.sum(preds_binary * labels_binary)
+        union = np.sum(preds_binary) + np.sum(labels_binary) - intersection
 
         # Compute IoU or handle the case with no presence of the class
-        if union == 0:
-            iou_scores.append(1.0 if intersection == 0 else 0.0)
+        if np.count_nonzero(union) == 0:
+            iou_scores.append(1.0 if np.count_nonzero(intersection) == 0 else 0.0)
         else:
-            iou_scores.append((intersection / union).item())
+            iou_scores.append(intersection / union)
 
     # Unpack the list to return individual IoU scores
     return tuple(iou_scores)
@@ -162,10 +180,12 @@ def iou(preds, labels, pos_label=1):
 
 def calc_f1_score(predicted_masks, gt_masks, threshold=0.5):
     # Flatten the masks
-    predicted_masks = torch.sigmoid(predicted_masks)
-    predicted_masks = (predicted_masks > threshold).float().cpu().numpy().flatten()
-    gt_masks = gt_masks.cpu().numpy().flatten()
-    
+    # predicted_masks = torch.sigmoid(predicted_masks)
+    predicted_masks = predicted_masks.cpu().numpy()
+    gt_masks = gt_masks.cpu().numpy()
+    predicted_masks = (predicted_masks > threshold).astype(np.float32).flatten()
+    gt_masks = gt_masks.flatten()
+    # print(gt_masks.shape, predicted_masks.shape)
     # Calculate precision, recall, and f1 score
     precision = precision_score(gt_masks, predicted_masks, average='binary' , zero_division= 1)
     recall = recall_score(gt_masks, predicted_masks, average='binary' , zero_division = 1)
@@ -175,11 +195,12 @@ def calc_f1_score(predicted_masks, gt_masks, threshold=0.5):
 
 def dice_loss(predicted_masks, gt_masks, smooth=1e-6):
     # Apply sigmoid to get probabilities
-    predicted_masks = torch.sigmoid(predicted_masks)
+    # predicted_masks = torch.sigmoid(predicted_masks)
     
     # Flatten the masks
-    predicted_masks = predicted_masks.view(-1)
-    gt_masks = gt_masks.view(-1)
+    predicted_masks = predicted_masks.to('cuda')
+    predicted_masks = predicted_masks.flatten()
+    gt_masks = gt_masks.flatten()
     
     # Compute intersection and sums
     intersection = (predicted_masks * gt_masks).sum()
@@ -281,3 +302,107 @@ class matching_algorithm:
             avg_tp_iou = 0
         return tp_iou_list, avg_tp_iou
 
+
+
+
+
+
+class PostProcessing():
+    def post_process(self, pred, thresh=0.5, thresh_b=0.6, mina=100, mina_b=50):
+        """
+        Post-processes a prediction mask to obtain a refined segmentation.This function refines 
+        a semantic segmentation mask, particularly for building segmentation tasks.
+        It leverages optional channels for predicting borders and spacing around buildings.
+
+        Args:
+            pred (numpy.ndarray): Prediction mask with shape (height, width, channels).
+            thresh (float, default=0.5): Threshold for considering pixels as part of the final segmentation.
+            thresh_b (float, default=0.6): Threshold for considering pixels as borders between objects.
+            mina (int, default=100): Minimum area threshold for retaining segmented regions.
+            mina_b (int, default=50): Minimum area threshold for retaining basins.
+
+        Returns:
+            numpy.ndarray: Refined segmentation mask.
+
+        Description:
+            The refinement process involves:
+            1. Extracting individual channels from the input mask.
+            2. Separating nuclei (building interiors) from borders based on the predicted borders channel.
+            3. Applying thresholding to identify basins within nuclei, which represent potential individual buildings.
+            4. Optionally filtering out small basins based on the minimum area threshold.
+            5. Performing watershed segmentation to separate closely located buildings.
+            6. Applying noise filtering to remove small regions from the segmented mask.
+            7. Returning the refined segmentation mask with labeled and filtered regions.
+
+        Note:
+            - The function assumes a specific order for input channels:
+                - Channel 0: Building predictions
+                - Channel 1 (optional): Border predictions
+                - Channel 2 (optional): Spacing predictions
+            - The output represents labeled regions in the refined segmentation.
+
+        """
+        if len(pred.shape) < 2:
+            return None
+        if len(pred.shape) == 2:
+            pred = pred[..., np.newaxis]
+
+        ch = pred.shape[2]
+        buildings = pred[..., 0]
+
+        if ch > 1:
+            borders = pred[..., 1]
+            nuclei = buildings * (1.0 - borders)
+
+            if ch == 3:
+                spacing = pred[..., 2]
+                nuclei *= (1.0 - spacing)
+
+            basins = label(nuclei > thresh_b, background=0, connectivity=2)
+
+            if mina_b > 0:
+                basins = self.noise_filter(basins, mina=mina_b)
+                basins = label(basins, background=0, connectivity=2)
+
+            washed = watershed(image=-buildings, markers=basins, mask=buildings > thresh, watershed_line=False)
+
+        elif ch == 1:
+            washed = buildings > thresh
+
+        washed = label(washed, background=0, connectivity=2)
+        washed = self.noise_filter(washed, mina=mina)
+        washed = label(washed, background=0, connectivity=2)
+
+        return washed
+    
+    @staticmethod
+    def noise_filter(washed,mina):
+        """
+        Filter small regions in a labeled segmentation mask based on minimum area.
+        This function filters out small labeled regions in a segmentation mask based on their area.
+        It iterates over unique labels, calculates the area for each label, and sets the pixel values
+        corresponding to labels with area less than or equal to the specified threshold to 0.
+
+        Args:
+            washed (numpy.ndarray): Input labeled segmentation mask.
+            mina (int): Minimum area threshold for retaining labeled regions.
+
+        Returns:
+            numpy.ndarray: Segmentation mask with small labeled regions filtered out.
+        """
+        values = np.unique(washed)
+        for val in values[1:]:
+            area = (washed[washed == val]>0).sum()
+            if area<=mina:
+                washed[washed == val] = 0
+        return washed
+    
+    def post_process_batch(self, preds, thresh=0.5, thresh_b=0.6, mina=100, mina_b=50):
+        processed_preds = []
+        for pred in preds:
+            processed_pred = self.post_process(pred.squeeze(0), thresh, thresh_b, mina, mina_b)
+            processed_pred = self.noise_filter(processed_pred, mina=100)
+            # Add an extra dimension to match the shape of the ground truth masks
+            processed_pred = np.expand_dims(processed_pred, axis=0)
+            processed_preds.append(processed_pred)
+        return np.array(processed_preds)

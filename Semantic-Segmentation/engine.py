@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.optim import Adam , lr_scheduler
 from torch.nn.functional import binary_cross_entropy_with_logits
 from tqdm import tqdm
-from utils import iou , calc_f1_score ,dice_loss , matching_algorithm
+from utils import iou , calc_f1_score ,dice_loss , matching_algorithm , postprocess , PostProcessing
 from torch.cuda.amp import GradScaler, autocast
 
 
@@ -174,6 +174,15 @@ def test(model , test_loader , checkpoint:str , device , output_dir:str , name:s
         with torch.no_grad():
             outputs = model(images)
             loss = binary_cross_entropy_with_logits(outputs, masks)
+            outputs = torch.sigmoid(outputs)
+            # Convert model outputs to numpy arrays, then post-process
+            # outputs = postprocess(outputs)
+            postprocess = PostProcessing()
+            outputs = outputs.cpu().numpy()
+            outputs = postprocess.post_process_batch(outputs)
+            # outputs = postprocess.noise_filter(outputs , mina = 10)
+            outputs = torch.tensor(outputs)
+            # print(outputs.shape , masks.shape)
             iou_3 , iou_5 , iou_7 = iou(preds=outputs , labels = masks)
             test_ious_3 += iou_3
             test_ious_5 += iou_5
