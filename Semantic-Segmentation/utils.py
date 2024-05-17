@@ -122,15 +122,15 @@ def plot(model, images, gt_masks, checkpoint, device , with_postprocess = True):
     images = images.cpu().numpy()
     gt_masks = gt_masks.squeeze(1).cpu().numpy()  # Remove channel dim if it's 1
     outputs = outputs.squeeze(0)
-    predicted_masks = outputs.permute(0 , 2,3,1).cpu().numpy()  # Thresholding to create binary mask
+    predicted_masks = outputs.permute(0, 2, 3, 1).cpu().numpy()  # Thresholding to create binary mask
 
     num_images = images.shape[0]
     fig, axs = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
     
     for idx in range(num_images):
         axs[idx, 0].imshow(np.transpose(images[idx], (1, 2, 0)))  # Convert from CHW to HWC format
-        axs[idx, 0].set_title('Input Image')
-        axs[idx, 1].imshow(gt_masks[idx], cmap='viridis')
+        axs[idx, 0].set_title('Input Image') 
+        axs[idx, 1].imshow(gt_masks[idx,:, :] , cmap='viridis')
         axs[idx, 1].set_title('Ground Truth Mask')
         axs[idx, 2].imshow(predicted_masks[idx], cmap='viridis')
         axs[idx, 2].set_title('Predicted Mask')

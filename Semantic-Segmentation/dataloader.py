@@ -33,7 +33,8 @@ class WHU(Dataset):
             ])
         
         self.transform_masks = transforms.Compose([
-            transforms.Resize((512, 512)),  
+            transforms.Resize((512, 512)), 
+            transforms.Grayscale(), 
             transforms.ToTensor()
         ])
 

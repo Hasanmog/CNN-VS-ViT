@@ -12,7 +12,7 @@ from utils import iou , calc_f1_score ,dice_loss , matching_algorithm , postproc
 from torch.cuda.amp import GradScaler, autocast
 
 
-def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_dir ,device , neptune_config , resume_checkpoint = None):
+def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_dir ,device , neptune_config , resume_checkpoint = None , pretrain_checkpoint = None):
 
     with open(neptune_config) as config_file:
         config = json.load(config_file)
@@ -41,6 +41,11 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
         for g in optimizer.param_groups:
             g['lr'] = lr
         print("Resuming from checkpoint")
+        
+    if pretrain_checkpoint:
+        checkpoint = torch.load(pretrain_checkpoint)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
 
     # Initialize the learning rate scheduler based on user input
     if lr_schedule == "onecyclelr":

@@ -85,6 +85,6 @@ class Segmentor(nn.Module):
         # x = torch.cat((x, x_4_up), dim=1)
         x = self.dec_layer3(x + x_4_up)
         
-        x = torch.clamp(x, min=-10, max=10)
+        x = torch.clamp(x, min=0, max=1)
 
         return x
