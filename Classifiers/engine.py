@@ -7,7 +7,7 @@ from torch.optim import optimizer
 from torch.nn.functional import cross_entropy
 
 
-def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_scheduler, epochs, loss_func, device, out_dir, resume=False, checkpoint_path=None , neptune_id = None , neptune_config = None):
+def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_scheduler, epochs, loss_func, device, out_dir,lora, resume=False, checkpoint_path=None , neptune_id = None , neptune_config = "../neptune.json"):
     
     with open(neptune_config) as config_file:
             config = json.load(config_file)
@@ -15,27 +15,38 @@ def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_sch
     project = config['project']
     # Initialize or resume Neptune run
     if resume and checkpoint_path:
-        run = neptune.init_run(
-                    project=project,  # specify your project name here
-                    api_token= api_token,
-                    with_id = neptune_id
-    )   
+    #     run = neptune.init_run(
+    #                 project=project,  # specify your project name here
+    #                 api_token= api_token,
+    #                 with_id = neptune_id
+    # )   
         
         # Load checkpoint
         checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'] , strict = False)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch']
         print(f"Resuming training from epoch {start_epoch}")
-    else:
-        run = neptune.init_run(
-                    project=project,  # specify your project name here
-                    api_token= api_token,
+    else: 
+        start_epoch = 0
+    run = neptune.init_run(
+                project=project,  # specify your project name here
+                api_token= api_token,
                     #with_id = 'VLMEO-1048'
     )   
+        
+    if lora:
         start_epoch = 0
-    
+        # Freeze all parameters first
+        for param in model.parameters():
+            param.requires_grad = False
+
+        # Enable training only on LoRA layers
+        for name, param in model.named_parameters():
+            if 'lora_A' in name or 'lora_B' in name:  # Adjust this condition based on your model's parameter names
+                # param.data = torch.randn_like(param) * 0.01
+                param.requires_grad = True
     for epoch in tqdm(range(start_epoch, epochs)):
         print(f"Epoch number: {epoch + 1}")
         # Reset loss and accuracy tracking variables
