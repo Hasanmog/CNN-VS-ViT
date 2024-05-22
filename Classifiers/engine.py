@@ -7,7 +7,7 @@ from torch.optim import optimizer
 from torch.nn.functional import cross_entropy
 
 
-def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_scheduler, epochs, loss_func, device, out_dir,lora, resume=False, checkpoint_path=None , neptune_id = None , neptune_config = "../neptune.json"):
+def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_scheduler, epochs, loss_func, device, out_dir, resume=False, checkpoint_path=None , neptune_id = None , neptune_config = "../neptune.json"):
     
     with open(neptune_config) as config_file:
             config = json.load(config_file)
@@ -35,18 +35,7 @@ def train_one_epoch(model, training_loader, validation_loader, optimizer, lr_sch
                 api_token= api_token,
                     #with_id = 'VLMEO-1048'
     )   
-        
-    if lora:
-        start_epoch = 0
-        # Freeze all parameters first
-        for param in model.parameters():
-            param.requires_grad = False
 
-        # Enable training only on LoRA layers
-        for name, param in model.named_parameters():
-            if 'lora_A' in name or 'lora_B' in name:  # Adjust this condition based on your model's parameter names
-                # param.data = torch.randn_like(param) * 0.01
-                param.requires_grad = True
     for epoch in tqdm(range(start_epoch, epochs)):
         print(f"Epoch number: {epoch + 1}")
         # Reset loss and accuracy tracking variables

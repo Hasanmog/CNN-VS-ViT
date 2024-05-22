@@ -14,9 +14,9 @@ from PIL import Image
 # Define the transformation
 # Define the transformation
 transform = transforms.Compose([
-    transforms.ToTensor(),  # Converts image to tensor and scales to [0, 1]
-    transforms.Resize((64,64)) , 
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))  # Normalizes the tensor
+    transforms.Resize((256,256)) , 
+    transforms.ToTensor(),  # Convert image to tensor
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])   
 ])
 
 def preprocess(image_input):
@@ -42,9 +42,8 @@ def preprocess(image_input):
 
 def load_model():
     model = NN_4()  # Create an instance of the model
-    weights_path = 'Classifiers/weights/NN_attempt_4/best_checkpoint.pth'  # Path to the model weights
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    checkpoint = torch.load("/home/hasanmog/paper2code/Classifiers/weights/NN_attempt_4/best_checkpoint.pth")
+    checkpoint = torch.load("/home/hasanmog/CNN-VS-ViT/Classifiers/weights/UC-Merced/UC-Merced.pth")
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()  # Set the model to inference mode
@@ -53,8 +52,9 @@ def load_model():
 
 def run(input):
     try:
-        classes = ['Annual Crop', 'Forest', 'Herbaceous Vegetation', 'Highway', 'Industrial',
-                   'Pasture', 'Permanent Crop', 'Residential', 'River', 'SeaLake']
+        classes = ['Agricultural', 'Airplane', 'Baseball diamond', 'Beach', 'Buildings', 'Chaparral', 'Dense residential', 'Forest', 'Freeway',
+               'Golf course', 'Harbor', 'Intersection', 'Medium residential', 'Mobile home park', 'Overpass', 'Parking lot', 'River',
+               'Runway', 'Sparse residential', 'Storage tanks', 'Tennis court']
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         processed_input = preprocess(input)
         if processed_input is None:
@@ -73,11 +73,42 @@ def run(input):
         return f"An error occurred during classification: {e}"
 
     
-iface = gr.Interface(fn=run, 
-                     inputs="image", 
-                     outputs="label" , 
-                     title = "Classification Model trained on EuroSAT dataset (64 x 64)" ,
-                     description="Please upload an image of size 64x64 pixels. This model is specifically trained on images of this size for optimal performance")
+iface = gr.Interface(
+    fn=run,
+    inputs="image",
+    outputs="label",
+    title="Land Cover Classification Model",
+    description="""
+    Welcome to the Land Cover Classification Model interface! This tool uses a deep learning model trained on the UC-Merced dataset, 
+    specifically designed to recognize 21 different types of land cover from satellite images. Each image should be 256x256 pixels in size 
+    for optimal classification accuracy. The model achieved an accuracy of 84% on the test set, showcasing its effectiveness in diverse environments.
+
+    Please upload a satellite image of size 256x256 pixels to classify it into one of the following categories:
+    - Agricultural
+    - Airplane
+    - Baseball Diamond
+    - Beach
+    - Buildings
+    - Chaparral
+    - Dense Residential
+    - Forest
+    - Freeway
+    - Golf Course
+    - Harbor
+    - Intersection
+    - Medium Residential
+    - Mobile Home Park
+    - Overpass
+    - Parking Lot
+    - River
+    - Runway
+    - Sparse Residential
+    - Storage Tanks
+    - Tennis Court
+
+    After uploading an image, the model will predict the category it believes best represents the land cover seen in the image.
+    """
+)
 
 # Run the interface
 iface.launch()
