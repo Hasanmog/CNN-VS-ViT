@@ -407,3 +407,54 @@ class PostProcessing():
             processed_pred = np.expand_dims(processed_pred, axis=0)
             processed_preds.append(processed_pred)
         return np.array(processed_preds)
+
+
+def plot_overlay(model, images, gt_masks, checkpoint, device, with_postprocess=True):
+    # Load model weights
+    model.load_state_dict(torch.load(checkpoint)['model_state_dict'])
+    model.to(device)
+    model.eval()
+
+    with torch.no_grad():
+        outputs = model(images.to(device))
+        outputs = torch.sigmoid(outputs)  # Assuming binary classification (sigmoid output)
+        if with_postprocess:
+            postprocess = PostProcessing()
+            outputs = outputs.cpu().numpy()
+            outputs = postprocess.post_process_batch(outputs)
+            outputs = postprocess.noise_filter(outputs, mina=10)
+        outputs = torch.tensor(outputs).to(device)
+
+    images = images.cpu().numpy()
+    gt_masks = gt_masks.squeeze(1).cpu().numpy()  # Remove channel dim if it's 1
+    outputs = outputs.squeeze(1).cpu().numpy()  # Ensure outputs are on CPU and squeezed
+
+    num_images = images.shape[0]
+    fig, axs = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
+    
+    for idx in range(num_images):
+        img = np.transpose(images[idx], (1, 2, 0))  # Convert CHW to HWC
+        gt_mask = gt_masks[idx]
+        pred_mask = outputs[idx]
+
+        # Normalize image for display
+        img_display = (img - img.min()) / (img.max() - img.min())
+
+        axs[idx, 0].imshow(img_display)
+        axs[idx, 0].set_title('Input Image')
+
+        # Overlay ground truth mask
+        axs[idx, 1].imshow(img_display)
+        axs[idx, 1].imshow(gt_mask, cmap='viridis', alpha=0.5)  # alpha for transparency
+        axs[idx, 1].set_title('Ground Truth Mask Overlay')
+
+        # Overlay predicted mask
+        axs[idx, 2].imshow(img_display)
+        axs[idx, 2].imshow(pred_mask, cmap='viridis', alpha=0.5)  # alpha for transparency
+        axs[idx, 2].set_title('Predicted Mask Overlay')
+
+        for ax in axs[idx]:
+            ax.axis('off')
+    
+    plt.tight_layout()
+    plt.show()

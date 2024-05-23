@@ -70,7 +70,6 @@ class WHU(Dataset):
 
     #     return torch.tensor(class_id_mask, dtype=torch.long)
 
-
         
 
         
