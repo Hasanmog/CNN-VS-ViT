@@ -37,9 +37,6 @@ class WHU(Dataset):
             transforms.Grayscale(), 
             transforms.ToTensor()
         ])
-
-        # color_mapping = pd.read_csv(os.path.join(parent_dir, "class_dict_seg.csv"))
-        # self.color_map ={ (row[' r'], row[' g'], row[' b']): idx for idx, row in color_mapping.iterrows() }
         
     def __len__(self):
         return len(self.images)
