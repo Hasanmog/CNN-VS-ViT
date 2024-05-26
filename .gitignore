@@ -5,9 +5,10 @@ lib64
 pyvenv.cfg
 share
 etc/jupyter/nbconfig/notebook.d
-Classifiers/weights
+Classifiers/CNN-Based/weights
 Classifiers/.neptune
-Classifiers/__pycache__
+Classifiers/CNN-Based/__pycache__
+Classifiers/CNN-Based/Networks
 Semantic-Segmentation/CNN-BASED/.neptune
 Semantic-Segmentation/CNN-BASED/weights
 Semantic-Segmentation/CNN-BASED/__pycache__
