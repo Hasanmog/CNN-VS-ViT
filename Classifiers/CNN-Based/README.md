@@ -74,12 +74,15 @@ Below are some example results from the model, showing the input images, ground 
 ![Inference Results](.asset/output.png)
 
 ## Weight File :
+
 You can find the training weight file on UC-Merced Dataset [here](https://drive.google.com/file/d/1SyOo55bk-3-WmLwfODHZ5JlLvzmF9Ztw/view?usp=sharing)
 
 You can also find the training weight file on EuroSAT Dataset [here](https://drive.google.com/file/d/1INZ-ftHMYnJce9jwsXQHwwnxeKFgmBYG/view?usp=sharing)
 
 ## WorkArea:
+
 The `WorkArea.ipynb` is a notebook where I've done the training and inference.
+
 ## Gradio Web Interface
 
 A Gradio web interface has been set up to allow users to easily test the model with their own images or use sample images from the dataset. This interface provides a user-friendly way to interact with the model in real-time.
@@ -97,9 +100,11 @@ To run the Gradio interface, follow these steps:
 
    pip install -r requirements.txt
 
+   ```
+
 2. **gradio_run.py** :
-     
-     replace `line 46` with the path of the donwloaded checkpoint.
+
+   replace `line 46` with the path of the downloaded checkpoint.
 
 3. **Run**
 

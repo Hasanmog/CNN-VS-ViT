@@ -97,6 +97,6 @@ To run the Gradio interface, follow these steps:
 
 2. **gradio_run.py** :
      
-     replace `line 18` with the path of the donwloaded checkpoint.
+     replace `line 18` with the path of the downloaded checkpoint.
 
 3. **Run**
