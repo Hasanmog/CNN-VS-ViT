@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from utils import nms
 
 class DetectorHead(nn.Module):
     def __init__(self ,in_channels ,  anchors , num_classes = 6 ,):
@@ -55,6 +57,30 @@ class Detector(nn.Module):
         x = self.detection(x)
         return x
 
-def posprocessing(outputs , score_threshold = 0.5 , box_threshold = 0.5):
+def decode_outputs(outputs, score_threshold=0.5, iou_threshold=0.5, num_classes=6, anchors=5):
     
-    boxes , scores , classes = outputs['boxes'] , outputs['scores'] , outputs['class_probs']
+    '''
+    outputs: Tensor of size (B , anchor*(4+1+num_classes) , H , W)
+    x 
+    y
+    h
+    w
+    object score
+    c0
+    c1
+    c2
+    c3
+    c4
+    c5
+    '''
+
+    B, C, H, W = outputs.shape  # Outputs shape (B, 55, H, W)
+    
+    outputs = outputs.view(B, anchors, 5 + num_classes, H, W)
+    outputs = outputs.permute(0, 1, 3, 4, 2).contiguous()
+
+    boxes = outputs[..., :4]
+    scores = torch.sigmoid(outputs[..., 4])
+    class_probs = torch.sigmoid(outputs[..., 5:])
+
+    return boxes , scores,  class_probs
