@@ -2,7 +2,9 @@ import torch
 import torch.nn.functional as F
 import neptune
 import json
-from torch.optim import Adam
+from model import decode_outputs
+from postprocessing import convert_to_mins_maxes , non_max_suppression , process_boxes
+from torch.optim import Adam , lr_scheduler
 from torchvision.ops import box_iou
 from torch.cuda.amp import GradScaler, autocast
 
@@ -43,18 +45,19 @@ def compute_loss(pred_bbox, pred_labels, pred_obj_scores, gt_bbox, gt_labels, nu
     
 
 
-def train(model , train_loader , val_loader ,lr ,lr_scheduler, epochs , out_dir , device , neptune_config):
+def train(model , train_loader , val_loader ,lr ,lr_schedule, epochs , out_dir , device , neptune_config = None):
     
-    with open(neptune_config) as config_file:
-        config = json.load(config_file)
-        api_token = config.get('api_token')
-        project = config.get('project')
+    if neptune_config != None :
+        with open(neptune_config) as config_file:
+            config = json.load(config_file)
+            api_token = config.get('api_token')
+            project = config.get('project')
 
-    run = neptune.init_run(
-        project=project, 
-        api_token=api_token,
-        # with_id='SOL-91'  # Uncomment if you need to specify a particular run ID
-    )
+        run = neptune.init_run(
+            project=project, 
+            api_token=api_token,
+            # with_id='SOL-91'  # Uncomment if you need to specify a particular run ID
+        )
     
     model.to(device)
     optimizer = Adam(model.parameters() , lr = lr)
@@ -68,12 +71,37 @@ def train(model , train_loader , val_loader ,lr ,lr_scheduler, epochs , out_dir 
         lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
         
     scaler = GradScaler()
-    
-    for idx , sample in enumerate(train_loader):
-        
-        img , gt_bbox , gt_label = sample['image_tensor'] , sample['bboxes'] , sample['category']
-        
-        for epoch in range(epochs):
-            print(f"current epoch :{epoch}")
-    
+    for epoch in range(epochs):
+        print(f"current epoch :{epoch}")
+        for idx , sample in enumerate(train_loader):
+            img , gt_bbox , gt_label = sample['image_tensor'] , sample['bboxes'] , sample['category']
+            model.train(True)
+            with autocast():
+                outputs = model(img)
+                boxes , object , class_scores = decode_outputs(outputs) 
+                boxes = boxes.reshape(-1, 4)
+                class_scores = class_scores.reshape(-1, 6)
+                assert boxes.shape[0] == class_scores.shape[0], "Mismatch in bounding boxes and class scores counts"
+                picked_boxes, picked_scores, picked_classes = non_max_suppression(boxes,class_scores)
+            
+            loss = compute_loss(pred_bbox=picked_boxes , pred_labels=picked_classes , pred_obj_scores= picked_scores,
+                                gt_bbox= gt_bbox , gt_labels = gt_label , num_classes=6)
+            
+            print(f"Train loss:{loss}")
+        model.eval()
+        for idx , sample in enumerate(val_loader):
+            img , gt_bbox , gt_label = sample['image_tensor'] , sample['bboxes'] , sample['category']
+            with torch.no_grad(), autocast():
+                outputs = model(img)
+                boxes , object , class_scores = decode_outputs(outputs) 
+                boxes = boxes.reshape(-1, 4)
+                class_scores = class_scores.reshape(-1, 6)
+                assert boxes.shape[0] == class_scores.shape[0], "Mismatch in bounding boxes and class scores counts"
+                picked_boxes, picked_scores, picked_classes = non_max_suppression(boxes,class_scores)
+            
+            loss = compute_loss(pred_bbox=picked_boxes , pred_labels=picked_classes , pred_obj_scores= picked_scores,
+                                gt_bbox= gt_bbox , gt_labels = gt_label , num_classes=6)
+            
+            print(f"val loss:{loss}")
+                        
     
