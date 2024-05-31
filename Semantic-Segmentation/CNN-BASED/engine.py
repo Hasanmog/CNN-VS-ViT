@@ -20,9 +20,8 @@ def train_val(model ,train_loader , val_loader, epochs , lr , lr_schedule , out_
         project = config.get('project')
 
     run = neptune.init_run(
-        project=project,  # specify your project name here
+        project=project,  
         api_token=api_token,
-        # with_id='SOL-91'  # Uncomment if you need to specify a particular run ID
     )
 
     model = model.to(device)
