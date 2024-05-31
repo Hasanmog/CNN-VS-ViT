@@ -82,5 +82,11 @@ def decode_outputs(outputs, score_threshold=0.5, iou_threshold=0.5, num_classes=
     boxes = outputs[..., :4]
     scores = torch.sigmoid(outputs[..., 4])
     class_probs = torch.sigmoid(outputs[..., 5:])
+    
+    # # Assuming the last dimension of class_scores is the number of classes + objectness
+    # batch, anchors, height, width, features = class_probs.shape
+    # # Flatten to (batch * anchors * height * width, features)
+    
+    # class_scores = class_probs.reshape(-1, features)
 
     return boxes , scores,  class_probs

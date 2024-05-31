@@ -20,7 +20,7 @@ def convert_to_mins_maxes(box_xywh, input_shape=np.array([416, 416])):
 
     return boxes
 
-def process_boxes(image, boxes, convert_to_mins_maxes):
+def process_boxes(image, boxes, convert_to_mins_maxes): # USE IT LATER FOR VISUALIZATION
     # Suppose 'image' is a NumPy array or a PyTorch tensor
     height, width = image.shape[:2]
     input_shape = np.array([height, width])
@@ -29,7 +29,7 @@ def process_boxes(image, boxes, convert_to_mins_maxes):
     return converted_boxes
 
   
-def non_max_suppression(bounding_boxes, class_scores, iou_threshold=0.7, scores_threshold=0.2):
+def non_max_suppression(bounding_boxes, class_scores, iou_threshold=0.7, scores_threshold=0.5):
     """
     performs non max suppression. based on Malisiewicz et al. Code from https://github.com/amusi/Non-Maximum-Suppression/blob/master/nms.py
     alternative: https://nms.readthedocs.io/en/latest/_modules/nms/malisiewicz.html
@@ -40,6 +40,9 @@ def non_max_suppression(bounding_boxes, class_scores, iou_threshold=0.7, scores_
     :return:
     """
     # If no bounding boxes, return empty list
+    bounding_boxes = bounding_boxes.cpu()
+    bounding_boxes = bounding_boxes.detach().numpy()
+    class_scores = class_scores.cpu()
     if len(bounding_boxes) == 0:
         return [], []
 
@@ -53,6 +56,8 @@ def non_max_suppression(bounding_boxes, class_scores, iou_threshold=0.7, scores_
     # filter for threshold
     filtered_scores_indices = np.nonzero(max_scores_values >= scores_threshold)[0]
 
+    print("bounding boxes" , bounding_boxes.shape)
+    print("indices" , filtered_scores_indices.shape)
     filtered_classes = np.take(max_scores_indices, filtered_scores_indices)
     filtered_scores = np.take(max_scores_values, filtered_scores_indices)
     filtered_boxes = np.take(bounding_boxes, filtered_scores_indices, axis =0)
