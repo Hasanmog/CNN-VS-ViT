@@ -9,7 +9,7 @@ share
 etc/jupyter/nbconfig/notebook.d
 Classifiers/CNN-Based/weights
 Classifiers/.neptune
-Classifiers/CNN-Based/__pycache__
+Classifiers/__pycache__
 Classifiers/CNN-Based/Networks
 Classifiers/CNN-Based/Attempts.txt
 Semantic-Segmentation/CNN-BASED/.neptune
