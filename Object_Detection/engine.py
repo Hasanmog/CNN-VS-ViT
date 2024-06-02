@@ -74,7 +74,7 @@ def train(model , train_loader , val_loader ,lr ,lr_schedule, epochs , out_dir ,
     for epoch in range(epochs):
         print(f"current epoch :{epoch}")
         for idx , sample in enumerate(train_loader):
-            img , gt_bbox , gt_label = sample['image_tensor'] , sample['bboxes'] , sample['category']
+            img , gt_bbox , gt_label = sample['images'] , sample['boxes'] , sample['labels']
             model.train(True)
             with autocast():
                 outputs = model(img)
@@ -86,8 +86,13 @@ def train(model , train_loader , val_loader ,lr ,lr_schedule, epochs , out_dir ,
             
             loss = compute_loss(pred_bbox=picked_boxes , pred_labels=picked_classes , pred_obj_scores= picked_scores,
                                 gt_bbox= gt_bbox , gt_labels = gt_label , num_classes=6)
-            
             print(f"Train loss:{loss}")
+            scaler.scale(loss).backward()  # Backpropagation
+            scaler.step(optimizer)
+            scaler.update()
+            
+        lr_schedule.step()
+            
         model.eval()
         for idx , sample in enumerate(val_loader):
             img , gt_bbox , gt_label = sample['image_tensor'] , sample['bboxes'] , sample['category']
