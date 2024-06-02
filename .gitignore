@@ -1,3 +1,5 @@
+.vscode
+.neptune
 bin 
 include
 lib
