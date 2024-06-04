@@ -1,14 +1,18 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch import optim , lr_scheduler
+from torchvision.ops import complete_box_iou_loss
+from torch.optim import Adam , lr_scheduler
 from tqdm import tqdm
-from postprocessing import convert_to_mins_maxes , non_max_suppression , process_boxes , xywh_to_xyxy , post_process_outputs
+from postprocessing import convert_to_mins_maxes , xywh_to_xyxy , post_process_outputs
 from model import decode_outputs
 from torchvision.ops import nms
 
 
 
-# def loss():
+def loss(gt_bbox , pred_bbox):
+    
+    box_iou_loss = complete_box_iou_loss(gt_bbox , pred_bbox)
     
 
 def train(model , train_loader , val_loader ,
@@ -20,7 +24,7 @@ def train(model , train_loader , val_loader ,
           neptune_config = None):
     
     model = model.to(device)
-    optimizer = optim.Adam(model.parameters() , lr = lr)
+    optimizer = Adam(model.parameters() , lr = lr)
     
     
     # Initialize the learning rate scheduler based on user input
@@ -40,8 +44,7 @@ def train(model , train_loader , val_loader ,
         print(f"Current Epoch : {epoch}")
         for idx , batch in enumerate(train_loader):
 
-            images , gt_bbox , gt_labels , _ = batch
-
+            images , gt_bbox , gt_labels , _ = batch['images'] , batch['boxes'] , batch['labels'] , batch['img_path']   
             images = images.to(device)
             outputs = model(images)
 
@@ -53,9 +56,7 @@ def train(model , train_loader , val_loader ,
             obj_scores = torch.sigmoid(obj_scores)# each of these boxes have an object score (presence or absence)
             class_probs = outputs[..., num_boxes_coords + 1:]
             class_probs = F.softmax(class_probs, dim=-1)# also each box have a class probability(6 probabilities) indicating which class is present in this box
-            print(f"class scores : {class_probs[0].shape}")
             bboxes_corners = convert_to_mins_maxes(bbox_coords)
-            processed_boxes = post_process_outputs(bboxes_corners, 512 , 512)
 
 
             for i in range(batch_size):
@@ -67,9 +68,18 @@ def train(model , train_loader , val_loader ,
 
                     boxes_filtered = bboxes[keep_indices]
                     probs_filtered = class_probs[i, :, :, j, :].reshape(-1, num_classes)[keep_indices]
-            
                     
+            processed_boxes = post_process_outputs(boxes_filtered, 512 , 512)
+            print("boxes before:" , processed_boxes)
+                    
+            box_iou_loss = complete_box_iou_loss(gt_bbox , boxes_filtered)
+            box_iou_loss.backward()
             
+            class_loss = nn.CrossEntropyLoss()(probs_filtered , gt_labels)
+            class_loss.backward()
+            
+            print(box_iou_loss)
+            print(class_loss)
     
                         
     

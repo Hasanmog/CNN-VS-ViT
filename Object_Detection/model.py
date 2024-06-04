@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import nms
+
 
 class DetectorHead(nn.Module):
     def __init__(self ,in_channels ,  anchors , num_classes = 6 ,):
