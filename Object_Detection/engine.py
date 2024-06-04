@@ -7,6 +7,7 @@ from tqdm import tqdm
 from postprocessing import convert_to_mins_maxes , xywh_to_xyxy , post_process_outputs
 from model import decode_outputs
 from torchvision.ops import nms
+from utils import ciou
 
 
 
@@ -47,7 +48,6 @@ def train(model , train_loader , val_loader ,
             images , gt_bbox , gt_labels , _ = batch['images'] , batch['boxes'] , batch['labels'] , batch['img_path']   
             images = images.to(device)
             outputs = model(images)
-
             batch_size , attributes , grid_size , _ = outputs.shape
             outputs = outputs.view(batch_size, num_anchors, attributes_per_anchor, grid_size, grid_size) # 4 , 5 , 11 , 61 , 61
             outputs = outputs.permute(0, 3, 4, 1, 2) # 4 , 61 , 61 , 5 , 11
@@ -58,28 +58,7 @@ def train(model , train_loader , val_loader ,
             class_probs = F.softmax(class_probs, dim=-1)# also each box have a class probability(6 probabilities) indicating which class is present in this box
             bboxes_corners = convert_to_mins_maxes(bbox_coords)
 
-
-            for i in range(batch_size):
-                for j in range(num_anchors):  
-                    scores = obj_scores[i, :, :, j].flatten() 
-                    bboxes = bboxes_corners[i, :, :, j, :].reshape(-1, 4) 
-
-                    keep_indices = nms(bboxes, scores, iou_threshold=0.3)  # Apply NMS
-
-                    boxes_filtered = bboxes[keep_indices]
-                    probs_filtered = class_probs[i, :, :, j, :].reshape(-1, num_classes)[keep_indices]
-                    
-            processed_boxes = post_process_outputs(boxes_filtered, 512 , 512)
-            print("boxes before:" , processed_boxes)
-                    
-            box_iou_loss = complete_box_iou_loss(gt_bbox , boxes_filtered)
-            box_iou_loss.backward()
-            
-            class_loss = nn.CrossEntropyLoss()(probs_filtered , gt_labels)
-            class_loss.backward()
-            
-            print(box_iou_loss)
-            print(class_loss)
+            # TO BE CONTINUED AFTER CHECKING THE SHAPE OF EACH VARIABLE (add print statements after each line of code)
     
                         
     

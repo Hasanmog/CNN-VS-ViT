@@ -55,9 +55,9 @@ def xywh_to_xyxy(xywh):
     :param xywh: [X, Y, W, H]
     :return: [X1, Y1, X2, Y2]
     """
-    xywh = xywh.cpu()
-    xywh = xywh.detach().numpy()
-    print(xywh)
+    # xywh = xywh.cpu()
+    # xywh = xywh.detach().numpy()
+    # print(xywh)
     if np.array(xywh).ndim > 1 or len(xywh) > 4:
         raise ValueError('xywh format: [x1, y1, width, height]')
     x1 = xywh[0] - xywh[2] / 2
@@ -83,3 +83,5 @@ def post_process_outputs(outputs, image_width = 512, image_height = 512):
     y_max = (y_center + height / 2) * image_height
     
     return torch.stack([x_min, y_min, x_max, y_max], dim=-1)
+
+# CHECK WHICH IS USEFUL TO KEEP AND REMOVE OTHERS
