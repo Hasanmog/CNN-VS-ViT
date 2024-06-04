@@ -1,110 +1,85 @@
-# this is taken from https://gist.github.com/ciklista/7973ccf346ac7fd0a83e8ffa761af5de
+
 import numpy as np
-def convert_to_mins_maxes(box_xywh, input_shape=np.array([416, 416])):
-    """
-    Converts boxes of yolo output that comes as (x_center, y_center, w, h) to (y_min, x_min, y_max, x_max).
-    """
-    box_xy, box_wh = np.array_split(box_xywh, 2, axis=-1)
+import torch
+import cv2
 
-    box_yx = box_xy[..., ::-1]
-    box_hw = box_wh[..., ::-1]
 
-    box_mins = (box_yx - (box_hw / 2.)) / input_shape
-    box_maxes = (box_yx + (box_hw / 2.)) / input_shape
-    boxes = np.concatenate([
+# this is taken from https://gist.github.com/ciklista/7973ccf346ac7fd0a83e8ffa761af5de
+def convert_to_mins_maxes(box_xywh, input_shape=torch.tensor([512, 512], device='cuda:0')):
+    """
+    Converts boxes of YOLO output from (x_center, y_center, w, h) to (y_min, x_min, y_max, x_max)
+    directly using PyTorch on the GPU.
+    """
+    # Split the last dimension into xy and wh
+    box_xy = box_xywh[..., :2]  # x_center, y_center
+    box_wh = box_xywh[..., 2:]  # width, height
+
+    # Reverse the order to yx and hw
+    box_yx = box_xy.flip(dims=[-1])  # reverse xy to yx
+    box_hw = box_wh.flip(dims=[-1])  # reverse wh to hw
+
+    # Compute mins and maxes
+    box_mins = (box_yx - (box_hw / 2.0)) / input_shape
+    box_maxes = (box_yx + (box_hw / 2.0)) / input_shape
+
+    # Concatenate mins and maxes to get the final boxes in corner format
+    boxes = torch.cat([
         box_mins[..., 0:1],  # y_min
         box_mins[..., 1:2],  # x_min
         box_maxes[..., 0:1],  # y_max
         box_maxes[..., 1:2]  # x_max
-    ], axis=-1)
+    ], dim=-1)
 
     return boxes
 
-def process_boxes(image, boxes, convert_to_mins_maxes): # USE IT LATER FOR VISUALIZATION
-    # Suppose 'image' is a NumPy array or a PyTorch tensor
-    height, width = image.shape[:2]
-    input_shape = np.array([height, width])
 
-    converted_boxes = convert_to_mins_maxes(boxes, input_shape)
-    return converted_boxes
-
-  
-def non_max_suppression(bounding_boxes, class_scores, iou_threshold=0.7, scores_threshold=0.5):
+# These are taken from : https://gist.github.com/juliussin/b021d0ae74f6b4700009636335e48755
+def xyxy_to_xywh(xyxy):
     """
-    performs non max suppression. based on Malisiewicz et al. Code from https://github.com/amusi/Non-Maximum-Suppression/blob/master/nms.py
-    alternative: https://nms.readthedocs.io/en/latest/_modules/nms/malisiewicz.html
-    :param bounding_boxes: bounding boxes in shape (num_boxes,4) as (y1,x1,y2,x2)
-    :param class_scores: class scores in shape (num_boxes, num_classes)
-    :param iou_threshold:
-    :param scores_threshold:
-    :return:
+    Convert XYXY format (x,y top left and x,y bottom right) to XYWH format (x,y center point and width, height).
+    :param xyxy: [X1, Y1, X2, Y2]
+    :return: [X, Y, W, H]
     """
-    # If no bounding boxes, return empty list
-    bounding_boxes = bounding_boxes.cpu()
-    bounding_boxes = bounding_boxes.detach().numpy()
-    class_scores = class_scores.cpu()
-    if len(bounding_boxes) == 0:
-        return [], []
+    if np.array(xyxy).ndim > 1 or len(xyxy) > 4:
+        raise ValueError('xyxy format: [x1, y1, x2, y2]')
+    x_temp = (xyxy[0] + xyxy[2]) / 2
+    y_temp = (xyxy[1] + xyxy[3]) / 2
+    w_temp = abs(xyxy[0] - xyxy[2])
+    h_temp = abs(xyxy[1] - xyxy[3])
+    return np.array([int(x_temp), int(y_temp), int(w_temp), int(h_temp)])
 
-    ## filter all boxes that do not meet confidence threshold
-    # get max indices (class ids)
-    class_scores = class_scores.cpu().detach().numpy()  # Detach and convert to numpy
 
-    max_scores_indices = np.argmax(class_scores, axis = 1)
-    # flatten to highest scores
-    max_scores_values = class_scores[np.arange(len(class_scores)),max_scores_indices]
-    # filter for threshold
-    filtered_scores_indices = np.nonzero(max_scores_values >= scores_threshold)[0]
+def xywh_to_xyxy(xywh):
+    """
+    Convert XYWH format (x,y center point and width, height) to XYXY format (x,y top left and x,y bottom right).
+    :param xywh: [X, Y, W, H]
+    :return: [X1, Y1, X2, Y2]
+    """
+    xywh = xywh.cpu()
+    xywh = xywh.detach().numpy()
+    print(xywh)
+    if np.array(xywh).ndim > 1 or len(xywh) > 4:
+        raise ValueError('xywh format: [x1, y1, width, height]')
+    x1 = xywh[0] - xywh[2] / 2
+    y1 = xywh[1] - xywh[3] / 2
+    x2 = xywh[0] + xywh[2] / 2
+    y2 = xywh[1] + xywh[3] / 2
+    return np.array([int(x1), int(y1), int(x2), int(y2)])
 
-    print("bounding boxes" , bounding_boxes.shape)
-    print("indices" , filtered_scores_indices.shape)
-    filtered_classes = np.take(max_scores_indices, filtered_scores_indices)
-    filtered_scores = np.take(max_scores_values, filtered_scores_indices)
-    filtered_boxes = np.take(bounding_boxes, filtered_scores_indices, axis =0)
 
-    # coordinates of bounding boxes
-    start_x = filtered_boxes[:, 0]
-    start_y = filtered_boxes[:, 1]
-    end_x = filtered_boxes[:, 2]
-    end_y = filtered_boxes[:, 3]
-
-    # Picked bounding boxes
-    picked_boxes = []
-    picked_score = []
-    picked_classes = []
-
-    # Compute areas of bounding boxes
-    areas = (end_x - start_x + 1) * (end_y - start_y + 1)
-
-    # Sort by confidence score of bounding boxes
-    order = np.argsort(filtered_scores)
-
-    # Iterate bounding boxes
-    while order.size > 0:
-        # The index of largest confidence score
-        index = order[-1]
-        # highest_class_confidence_idx = np.argmax(class_scores[index])
-        # if class_scores[index][highest_class_confidence_idx] < scores_threshold:
-        #     break
-        # Pick the bounding box with largest confidence score
-        picked_boxes.append(filtered_boxes[index])
-        picked_score.append(filtered_scores[index])
-        picked_classes.append(filtered_classes[index])
-
-        # Compute ordinates of intersection-over-union(IOU)
-        x1 = np.maximum(start_x[index], start_x[order[:-1]])
-        x2 = np.minimum(end_x[index], end_x[order[:-1]])
-        y1 = np.maximum(start_y[index], start_y[order[:-1]])
-        y2 = np.minimum(end_y[index], end_y[order[:-1]])
-
-        # Compute areas of intersection-over-union
-        w = np.maximum(0.0, x2 - x1 + 1)
-        h = np.maximum(0.0, y2 - y1 + 1)
-        intersection = w * h
-
-        # Compute the ratio between intersection and union
-        ratio = intersection / (areas[index] + areas[order[:-1]] - intersection)
-
-        left = np.where(ratio < iou_threshold)
-        order = order[left]
-    return picked_boxes, picked_score, picked_classes
+def post_process_outputs(outputs, image_width = 512, image_height = 512):
+    # Assuming outputs are [batch_size, grid_size, grid_size, num_anchors, (4 + 1 + num_classes)]
+    # and the first four are bbox coordinates in the order [x_center, y_center, width, height]
+    sig = torch.sigmoid
+    outputs[..., :2] = sig(outputs[..., :2])  # Normalize x_center, y_center
+    outputs[..., 2:4] = sig(outputs[..., 2:4])  # Normalize width, height
+    
+    # Convert from center to corner format
+    x_center, y_center = outputs[..., 0], outputs[..., 1]
+    width, height = outputs[..., 2], outputs[..., 3]
+    x_min = (x_center - width / 2) * image_width
+    x_max = (x_center + width / 2) * image_width
+    y_min = (y_center - height / 2) * image_height
+    y_max = (y_center + height / 2) * image_height
+    
+    return torch.stack([x_min, y_min, x_max, y_max], dim=-1)

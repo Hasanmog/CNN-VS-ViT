@@ -1,66 +1,29 @@
 import torch
 import torch.nn.functional as F
-import neptune
-import json
+from torch import optim , lr_scheduler
+from tqdm import tqdm
+from postprocessing import convert_to_mins_maxes , non_max_suppression , process_boxes , xywh_to_xyxy , post_process_outputs
 from model import decode_outputs
-from postprocessing import convert_to_mins_maxes , non_max_suppression , process_boxes
-from torch.optim import Adam , lr_scheduler
-from torchvision.ops import box_iou
-from torch.cuda.amp import GradScaler, autocast
-
-# Taken from https://github.com/eriklindernoren/PyTorch-YOLOv3
-def compute_loss(pred_bbox, pred_labels, pred_obj_scores, gt_bbox, gt_labels, num_classes):
-    device = pred_bbox.device  # Assuming all tensors are on the same device
-    
-    # Constants for losses weights
-    lambda_coord = 5.0  # Weight for bbox loss
-    lambda_noobj = 0.5  # Weight for no object loss
-    lambda_obj = 1.0    # Weight for object loss
-    lambda_class = 1.0  # Weight for classification loss
-    
-    # Calculate IoU between predicted and ground truth boxes
-    iou = box_iou(pred_bbox, gt_bbox)
-    
-    # Objectness Loss: We calculate this as Binary Cross-Entropy
-    obj_loss = F.binary_cross_entropy(pred_obj_scores, iou.max(dim=1).values.unsqueeze(1), reduction='none')
-    
-    # Bounding Box Loss (using IoU loss as a proxy here, though typically you'd use CIoU or DIoU etc.)
-    bbox_loss = F.mse_loss(pred_bbox, gt_bbox, reduction='none').sum(dim=1)  # Sum loss over coordinates
-    
-    # Classification Loss (assuming pred_labels and gt_labels are already in the appropriate format)
-    class_loss = F.cross_entropy(pred_labels, gt_labels, reduction='none')
-    
-    # Only consider bbox loss and class loss where there's an object (iou.max(dim=1).values > some threshold)
-    object_mask = iou.max(dim=1).values > 0.5  # Threshold for determining an object presence
-    bbox_loss = bbox_loss * object_mask.float()
-    class_loss = class_loss * object_mask.float()
-    
-    # Weighted sum of losses
-    total_loss = (lambda_coord * bbox_loss.mean() + 
-                  lambda_obj * obj_loss[object_mask].mean() +
-                  lambda_noobj * obj_loss[~object_mask].mean() +
-                  lambda_class * class_loss.mean())
-    
-    return total_loss
-    
+from torchvision.ops import nms
 
 
-def train(model , train_loader , val_loader ,lr ,lr_schedule, epochs , out_dir , device , neptune_config = None):
-    
-    if neptune_config != None :
-        with open(neptune_config) as config_file:
-            config = json.load(config_file)
-            api_token = config.get('api_token')
-            project = config.get('project')
 
-        run = neptune.init_run(
-            project=project, 
-            api_token=api_token,
-            # with_id='SOL-91'  # Uncomment if you need to specify a particular run ID
-        )
+# def loss():
     
-    model.to(device)
-    optimizer = Adam(model.parameters() , lr = lr)
+
+def train(model , train_loader , val_loader ,
+          epochs , lr , device , lr_schedule ,
+          num_boxes_coords = 4 , 
+          num_classes = 6 ,
+          num_obj_score = 1 , 
+          num_anchors = 5 , 
+          neptune_config = None):
+    
+    model = model.to(device)
+    optimizer = optim.Adam(model.parameters() , lr = lr)
+    
+    
+    # Initialize the learning rate scheduler based on user input
     if lr_schedule == "onecyclelr":
         lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
     elif lr_schedule == "multi_step_lr":
@@ -69,44 +32,44 @@ def train(model , train_loader , val_loader ,lr ,lr_schedule, epochs , out_dir ,
         lr_schedule = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     else:
         lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
+    
+    attributes_per_anchor = num_boxes_coords+ num_obj_score + num_classes  
         
-    scaler = GradScaler()
-    for epoch in range(epochs):
-        print(f"current epoch :{epoch}")
-        for idx , sample in enumerate(train_loader):
-            img , gt_bbox , gt_label = sample['images'] , sample['boxes'] , sample['labels']
-            model.train(True)
-            with autocast():
-                outputs = model(img)
-                boxes , object , class_scores = decode_outputs(outputs) 
-                boxes = boxes.reshape(-1, 4)
-                class_scores = class_scores.reshape(-1, 6)
-                assert boxes.shape[0] == class_scores.shape[0], "Mismatch in bounding boxes and class scores counts"
-                picked_boxes, picked_scores, picked_classes = non_max_suppression(boxes,class_scores)
+    for epoch in tqdm(range(epochs)):
+        model.train(True)
+        print(f"Current Epoch : {epoch}")
+        for idx , batch in enumerate(train_loader):
+
+            images , gt_bbox , gt_labels , _ = batch
+
+            images = images.to(device)
+            outputs = model(images)
+
+            batch_size , attributes , grid_size , _ = outputs.shape
+            outputs = outputs.view(batch_size, num_anchors, attributes_per_anchor, grid_size, grid_size) # 4 , 5 , 11 , 61 , 61
+            outputs = outputs.permute(0, 3, 4, 1, 2) # 4 , 61 , 61 , 5 , 11
+            bbox_coords = outputs[..., :num_boxes_coords]  # each cell in the 61 x 61 grid has five boxes each of 4 coords (x , y , h , w)
+            obj_scores = outputs[..., num_boxes_coords] 
+            obj_scores = torch.sigmoid(obj_scores)# each of these boxes have an object score (presence or absence)
+            class_probs = outputs[..., num_boxes_coords + 1:]
+            class_probs = F.softmax(class_probs, dim=-1)# also each box have a class probability(6 probabilities) indicating which class is present in this box
+            print(f"class scores : {class_probs[0].shape}")
+            bboxes_corners = convert_to_mins_maxes(bbox_coords)
+            processed_boxes = post_process_outputs(bboxes_corners, 512 , 512)
+
+
+            for i in range(batch_size):
+                for j in range(num_anchors):  
+                    scores = obj_scores[i, :, :, j].flatten() 
+                    bboxes = bboxes_corners[i, :, :, j, :].reshape(-1, 4) 
+
+                    keep_indices = nms(bboxes, scores, iou_threshold=0.3)  # Apply NMS
+
+                    boxes_filtered = bboxes[keep_indices]
+                    probs_filtered = class_probs[i, :, :, j, :].reshape(-1, num_classes)[keep_indices]
             
-            loss = compute_loss(pred_bbox=picked_boxes , pred_labels=picked_classes , pred_obj_scores= picked_scores,
-                                gt_bbox= gt_bbox , gt_labels = gt_label , num_classes=6)
-            print(f"Train loss:{loss}")
-            scaler.scale(loss).backward()  # Backpropagation
-            scaler.step(optimizer)
-            scaler.update()
+                    
             
-        lr_schedule.step()
-            
-        model.eval()
-        for idx , sample in enumerate(val_loader):
-            img , gt_bbox , gt_label = sample['image_tensor'] , sample['bboxes'] , sample['category']
-            with torch.no_grad(), autocast():
-                outputs = model(img)
-                boxes , object , class_scores = decode_outputs(outputs) 
-                boxes = boxes.reshape(-1, 4)
-                class_scores = class_scores.reshape(-1, 6)
-                assert boxes.shape[0] == class_scores.shape[0], "Mismatch in bounding boxes and class scores counts"
-                picked_boxes, picked_scores, picked_classes = non_max_suppression(boxes,class_scores)
-            
-            loss = compute_loss(pred_bbox=picked_boxes , pred_labels=picked_classes , pred_obj_scores= picked_scores,
-                                gt_bbox= gt_bbox , gt_labels = gt_label , num_classes=6)
-            
-            print(f"val loss:{loss}")
+    
                         
     

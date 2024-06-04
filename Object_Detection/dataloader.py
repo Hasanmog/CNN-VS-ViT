@@ -38,26 +38,26 @@ def pad_resize(img, target_size=512):
     return img
 
 def custom_collate_fn(batch):
-    # Extract components from batch
     images = [item['image_tensor'] for item in batch]
+    img_path = [item['img_path'] for item in batch]
     boxes = [item['bboxes'] for item in batch]
     labels = [item['category'] for item in batch]
 
-    # Stack images (since they are of uniform size)
+    
     images = torch.stack(images, dim=0)
 
-    # Boxes and labels cannot be stacked directly as their sizes vary
     return {
         'images': images,
-        'boxes': boxes,  # Return as lists or convert to padded tensors if necessary
-        'labels': labels
+        'boxes': boxes, 
+        'labels': labels , 
+        'img_path' : img_path
     }
 
 
 class SARDet(Dataset):
-    def __init__(self, data_dir, imgs:list, mode:str):
+    def __init__(self, data_dir,imgs:list, mode:str , target_size = 512):
         self.imgs_paths = imgs
-        
+        self.target_size = target_size
         anno_file = 'train.json' if mode in ["train", "test"] else 'val.json'
         with open(os.path.join(data_dir, anno_file), 'r') as file:
             self.anno = json.load(file)
@@ -87,13 +87,15 @@ class SARDet(Dataset):
     def __getitem__(self, index):
         img_path = os.path.join(self.data_dir, self.imgs_paths[index])
         img = Image.open(img_path).convert('RGB')
+        orig_size = img.size[0]
         img = self.transform(img)
-        img = pad_resize(img)
+        img = pad_resize(img , target_size=self.target_size)
         
         image_id = self.filename_to_id.get(self.imgs_paths[index])
         annotations = self.id_to_annotations.get(image_id, []) # empty list if nothing exist
         
-        bboxes = [anno['bbox'] for anno in annotations]
+        bboxes = [list((coord/orig_size)*self.target_size for coord in anno['bbox']) for anno in annotations]
+
         category_ids = [anno['category_id'] for anno in annotations]
         
         output = {
