@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import math 
+from torchvision.ops import box_iou
+import itertools
 
 def file_format_counter(imgs_paths):
     '''
@@ -21,55 +23,85 @@ def file_format_counter(imgs_paths):
     return png , jpg , bmp
 
 
-def ciou(bboxes1, bboxes2):
-    bboxes1 = torch.sigmoid(bboxes1)
-    bboxes2 = torch.sigmoid(bboxes2)
-    rows = bboxes1.shape[0]
-    cols = bboxes2.shape[0]
-    cious = torch.zeros((rows, cols))
-    if rows * cols == 0:
-        return cious
-    exchange = False
-    if bboxes1.shape[0] > bboxes2.shape[0]:
-        bboxes1, bboxes2 = bboxes2, bboxes1
-        cious = torch.zeros((cols, rows))
-        exchange = True
-    w1 = torch.exp(bboxes1[:, 2])
-    h1 = torch.exp(bboxes1[:, 3])
-    w2 = torch.exp(bboxes2[:, 2])
-    h2 = torch.exp(bboxes2[:, 3])
-    area1 = w1 * h1
-    area2 = w2 * h2
-    center_x1 = bboxes1[:, 0]
-    center_y1 = bboxes1[:, 1]
-    center_x2 = bboxes2[:, 0]
-    center_y2 = bboxes2[:, 1]
+def bbox_iou(box1, box2):
+    """
+    Calculate the Intersection over Union (IoU) of two bounding boxes.
+    
+    Parameters
+    ----------
+    box1 : list of float
+        Coordinates [x_min, y_min, x_max, y_max] of the first box.
+    box2 : list of float
+        Coordinates [x_min, y_min, x_max, y_max] of the second box.
+    
+    Returns
+    -------
+    float
+        Intersection over union (IoU) between the two bounding boxes.
+    """
+    
+    # Determine the coordinates of the intersection rectangle
+    x_left = max(box1[0], box2[0])
+    y_top = max(box1[1], box2[1])
+    x_right = min(box1[2], box2[2])
+    y_bottom = min(box1[3], box2[3])
+    
+    if x_right < x_left or y_bottom < y_top:
+        return 0.0  # No overlap
 
-    inter_l = torch.max(center_x1 - w1 / 2,center_x2 - w2 / 2)
-    inter_r = torch.min(center_x1 + w1 / 2,center_x2 + w2 / 2)
-    inter_t = torch.max(center_y1 - h1 / 2,center_y2 - h2 / 2)
-    inter_b = torch.min(center_y1 + h1 / 2,center_y2 + h2 / 2)
-    inter_area = torch.clamp((inter_r - inter_l),min=0) * torch.clamp((inter_b - inter_t),min=0)
+    # The area of intersection rectangle
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
 
-    c_l = torch.min(center_x1 - w1 / 2,center_x2 - w2 / 2)
-    c_r = torch.max(center_x1 + w1 / 2,center_x2 + w2 / 2)
-    c_t = torch.min(center_y1 - h1 / 2,center_y2 - h2 / 2)
-    c_b = torch.max(center_y1 + h1 / 2,center_y2 + h2 / 2)
+    # The area of both bounding boxes
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
 
-    inter_diag = (center_x2 - center_x1)**2 + (center_y2 - center_y1)**2
-    c_diag = torch.clamp((c_r - c_l),min=0)**2 + torch.clamp((c_b - c_t),min=0)**2
-
-    union = area1+area2-inter_area
-    u = (inter_diag) / c_diag
-    iou = inter_area / union
-    v = (4 / (math.pi ** 2)) * torch.pow((torch.atan(w2 / h2) - torch.atan(w1 / h1)), 2)
-    with torch.no_grad():
-        S = (iou>0.5).float()
-        alpha= S*v/(1-iou+v)
-    cious = iou - u - alpha * v
-    cious = torch.clamp(cious,min=-1.0,max = 1.0)
-    if exchange:
-        cious = cious.T
-    return 1-cious
-
+    # Compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = intersection_area / float(box1_area + box2_area - intersection_area)
+    return iou
 # CHECK WHICH IS USEFUL TO KEEP AND REMOVE OTHERS
+
+def normalize_bboxes(gt_boxes, img_width, img_height):
+    """
+    Normalize bounding boxes. Assumes boxes are in the format [x_center, y_center, width, height].
+    
+    Parameters:
+        gt_boxes (list of lists): The bounding boxes for each image in the batch.
+        img_width (int or float): Width of the image.
+        img_height (int or float): Height of the image.
+    
+    Returns:
+        list of list: Normalized bounding boxes.
+    """
+    normalized_boxes = []
+    for boxes in gt_boxes:
+        norm_boxes = []
+        for box in boxes:
+            x_center, y_center, width, height = box
+            # Normalize center coordinates and dimensions
+            x_center /= img_width
+            y_center /= img_height
+            width /= img_width
+            height /= img_height
+            norm_boxes.append([x_center, y_center, width, height])
+        normalized_boxes.append(norm_boxes)
+    return normalized_boxes
+
+def assign_objectness_scores(anchors, gt_boxes, iou_threshold=0.5):
+    """
+    Assigns objectness scores based on IoU between anchors and ground truth boxes.
+    """
+    # anchors = anchors.reshape(-1, 4)
+    labels = torch.zeros(len(anchors))  # Default is zero (background)
+    for i, anchor in enumerate(anchors):
+        print(len(anchor))
+        for gt_box in gt_boxes:
+            print(len(gt_box))
+            iou = bbox_iou(anchor, gt_box)
+            if iou > iou_threshold:
+                labels[i] = 1  # Positive example
+                break
+    return labels
+
