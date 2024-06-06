@@ -71,7 +71,7 @@ def normalize_bboxes(gt_boxes, img_width, img_height):
             height /= img_height
             norm_boxes.append([x_center, y_center, width, height])
         normalized_boxes.append(norm_boxes)
-    return normalized_boxes
+    return torch.tensor(normalized_boxes)
 
 
 

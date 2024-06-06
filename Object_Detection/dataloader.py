@@ -48,7 +48,7 @@ def custom_collate_fn(batch):
     images = torch.stack([item['image_tensor'] for item in batch]) 
     padded_boxes = torch.zeros((len(batch), max_detections, 4)) 
     objectness_scores = torch.zeros((len(batch), max_detections)) 
-    padded_labels = torch.full((len(batch), max_detections), -1, dtype=torch.long)  
+    padded_labels = torch.full((len(batch), max_detections), 6, dtype=torch.long)  
 
     
     for i, item in enumerate(batch):

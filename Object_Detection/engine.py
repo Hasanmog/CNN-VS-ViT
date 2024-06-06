@@ -9,7 +9,8 @@ from model import decode_outputs
 from torchvision.ops import nms
 from utils import  normalize_bboxes , bbox_iou
 
-
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 def train(model , train_loader , val_loader ,
           epochs , lr , device , lr_schedule ,
@@ -39,16 +40,19 @@ def train(model , train_loader , val_loader ,
         model.train(True)
         print(f"Current Epoch : {epoch}")
         for idx , batch in enumerate(train_loader):
-
+            
+            
             images , gt_bbox , gt_obj_scores, gt_labels , path = batch['images'] , batch['boxes'] ,batch['objectness_scores'], batch['labels'] ,batch['img_path']
             # print("images" , images.shape)
             # print("gt_obj_scores: " , gt_obj_scores, gt_obj_scores.shape , type(gt_obj_scores))
             # print("gt_bbox" , gt_bbox , gt_bbox.shape , type(gt_bbox))
             # print("gt_labels" , gt_labels , gt_labels.shape , type(gt_labels))
             gt_bbox = normalize_bboxes(gt_boxes = gt_bbox , img_height= 512 , img_width=512)
+            print("gt_bbox" , gt_bbox.shape , type(gt_bbox))
             gt_labels = gt_labels.to(device)
             gt_obj_scores = gt_obj_scores.to(device)
             images = images.to(device)
+            optimizer.zero_grad()
             outputs = model(images)
             
             batch_size , attributes , grid_size , _ = outputs.shape
@@ -81,7 +85,6 @@ def train(model , train_loader , val_loader ,
             filtered_obj_scores = detections_filtered['scores'].to(device)
             filtered_class_probs = detections_filtered['class_probs'].to(device)  
             print("boxes" , filtered_pred_bbox.shape)
-            print("obj scores" , filtered_obj_scores.shape)
             print("class scores" , filtered_class_probs.shape)
             # Assuming gt_labels shape is [4, 100] (batch_size, max_detections)
             # Ensure gt_labels are within the expected range for class indices (0 to num_classes-1)
@@ -95,24 +98,31 @@ def train(model , train_loader , val_loader ,
                 filtered_class_probs.view(-1, num_classes),  # Flatten predictions to [batch_size * max_detections, num_classes]
                 gt_labels.view(-1)  # Flatten labels to [batch_size * max_detections]
             )
-            print("Class Loss:", class_loss.item())
+            print("class_loss" , class_loss)
+            class_loss = class_loss * 0.4
+            class_loss.backward(retain_graph=True)
+            
+            # print("obj scores" , filtered_obj_scores.shape)
+            # print("after:" , filtered_obj_scores.view(-1).shape)
+            # print("gt_obj_scores" ,type(gt_obj_scores) ,  gt_obj_scores.shape)
+            # print("after:" , gt_obj_scores.view(-1).shape)
+            # if gt_obj_scores.dtype != torch.float32:
+            #     gt_obj_scores = gt_obj_scores.float()
 
-            class_loss.backward()
+            obj_loss = torch.nn.functional.binary_cross_entropy(
+            filtered_obj_scores.view(-1), 
+            gt_obj_scores.view(-1) 
+            )  
+            print("obj loss" , obj_loss)
+            obj_loss = obj_loss * 0.2
+            obj_loss.backward(retain_graph=True)          
             
-            
-            obj_loss = torch.nn.functional.binary_cross_entropy_with_logits(
-            filtered_obj_scores.view(-1),  # Flatten predictions to [batch_size * max_detections]
-            gt_obj_scores.view(-1)  # Flatten ground truth to [batch_size * max_detections]
-            )
-            print("Objectness Loss:", obj_loss.item())
-            obj_loss.backward() 
-            
-                        # Assuming gt_bbox shape is [4, 100, 4] and pred_bbox shape is [4, 100, 4]
             bbox_loss = torch.nn.functional.smooth_l1_loss(
-                pred_bbox.view(-1, 4),  # Flatten predictions to [batch_size * max_detections, 4]
-                gt_bbox.view(-1, 4)  # Flatten ground truth to [batch_size * max_detections, 4]
+                filtered_pred_bbox.view(-1, 4),  
+                gt_bbox.view(-1, 4)
             )
-            print("Bounding Box Loss:", bbox_loss.item())
+            bbox_loss = bbox_loss*0.4
             bbox_loss.backward()
-         
-    
+            
+            # loss.backward()
+            optimizer.step()

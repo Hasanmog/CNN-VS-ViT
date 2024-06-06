@@ -99,6 +99,9 @@ def post_process_outputs(outputs, image_width = 512, image_height = 512):
 
 # CHECK WHICH IS USEFUL TO KEEP AND REMOVE OTHERS
 
+import torch
+from torch.nn.utils.rnn import pad_sequence
+
 def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_detections=100):
     batch_size = bbox_coords.size(0)
     # Prepare lists to hold tensors for each batch item
@@ -123,24 +126,45 @@ def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_de
         # Apply NMS to reduce boxes based on IOU threshold
         keep_indices = nms(filtered_boxes, combined_scores, iou_threshold)
 
-        # Limit the number of detections to max_detections
-        if len(keep_indices) > max_detections:
+        # Ensure that exactly max_detections are kept
+        keep_count = keep_indices.shape[0]
+        if keep_count > max_detections:
+            # Keep only the top scoring detections if there are too many
             top_scores, top_indices = torch.topk(combined_scores[keep_indices], max_detections)
             keep_indices = keep_indices[top_indices]
+        elif keep_count < max_detections:
+            # Pad with zeros if there are too few
+            pad_count = max_detections - keep_count
+            keep_indices = torch.cat([
+                keep_indices,
+                torch.full((pad_count,), -1, dtype=torch.long, device=keep_indices.device)  # Use an invalid index
+            ])
 
         # Collect final selections for this batch item
-        all_boxes.append(filtered_boxes[keep_indices])
-        all_scores.append(filtered_scores[keep_indices])
-        all_class_probs.append(filtered_class_probs[keep_indices])
+        padded_boxes = pad_tensor(filtered_boxes[keep_indices], max_detections, 0)
+        padded_scores = pad_tensor(filtered_scores[keep_indices], max_detections, 0)
+        padded_class_probs = pad_tensor(filtered_class_probs[keep_indices], max_detections, 6)  # Assuming '6' is a class index representing "no object"
 
-    # Pad tensors in list to ensure all have the same size, enabling tensor concatenation
-    final_boxes = torch.nn.utils.rnn.pad_sequence(all_boxes, batch_first=True, padding_value=-1)
-    final_scores = torch.nn.utils.rnn.pad_sequence(all_scores, batch_first=True, padding_value=-1)
-    final_class_probs = torch.nn.utils.rnn.pad_sequence(all_class_probs, batch_first=True, padding_value=-1)
+        all_boxes.append(padded_boxes)
+        all_scores.append(padded_scores)
+        all_class_probs.append(padded_class_probs)
 
-    # Return a dictionary with batched detections
     return {
-        'boxes': final_boxes,
-        'scores': final_scores,
-        'class_probs': final_class_probs
+        'boxes': torch.stack(all_boxes),
+        'scores': torch.stack(all_scores),
+        'class_probs': torch.stack(all_class_probs)
     }
+
+def pad_tensor(tensor, max_len, pad_value):
+    # Pads tensor to max_len with pad_value
+    current_len = tensor.size(0)
+    pad_size = max_len - current_len
+    if pad_size > 0:
+        # Compute the shape of the padding tensor
+        padding_shape = [pad_size] + list(tensor.shape[1:])
+        # Create a padding tensor of the correct shape
+        padding = torch.full(padding_shape, pad_value, dtype=tensor.dtype, device=tensor.device)
+        # Concatenate the original tensor with the padding tensor
+        tensor = torch.cat([tensor, padding], dim=0)
+    return tensor
+
