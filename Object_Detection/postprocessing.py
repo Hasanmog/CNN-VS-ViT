@@ -1,8 +1,8 @@
 
 import numpy as np
-import torch
 import cv2
-
+import torch
+from torchvision.ops import nms
 
 # this is taken from https://gist.github.com/ciklista/7973ccf346ac7fd0a83e8ffa761af5de
 def convert_to_mins_maxes(box_xywh, input_shape=torch.tensor([512, 512], device='cuda:0')):
@@ -49,22 +49,35 @@ def xyxy_to_xywh(xyxy):
     return np.array([int(x_temp), int(y_temp), int(w_temp), int(h_temp)])
 
 
+import torch
+
 def xywh_to_xyxy(xywh):
     """
-    Convert XYWH format (x,y center point and width, height) to XYXY format (x,y top left and x,y bottom right).
-    :param xywh: [X, Y, W, H]
-    :return: [X1, Y1, X2, Y2]
+    Convert a batch of bounding boxes from XYWH format (center x, center y, width, height)
+    to XYXY format (top-left x, top-left y, bottom-right x, bottom-right y) for an entire batch.
+    
+    :param xywh: Tensor of shape [batch_size, N, 4] where N is the number of boxes per image.
+    :return: Tensor of the same shape with each box converted to XYXY format.
     """
-    # xywh = xywh.cpu()
-    # xywh = xywh.detach().numpy()
-    # print(xywh)
-    if np.array(xywh).ndim > 1 or len(xywh) > 4:
-        raise ValueError('xywh format: [x1, y1, width, height]')
-    x1 = xywh[0] - xywh[2] / 2
-    y1 = xywh[1] - xywh[3] / 2
-    x2 = xywh[0] + xywh[2] / 2
-    y2 = xywh[1] + xywh[3] / 2
-    return np.array([int(x1), int(y1), int(x2), int(y2)])
+    if xywh.dim() != 3 or xywh.size(2) != 4:
+        raise ValueError('Input xywh tensor must be of shape [batch_size, N, 4]')
+    
+    # Extract the centers (x, y) and sizes (width, height)
+    x_c = xywh[..., 0]
+    y_c = xywh[..., 1]
+    w = xywh[..., 2]
+    h = xywh[..., 3]
+    
+    # Compute top-left (x1, y1) and bottom-right (x2, y2)
+    x1 = x_c - w / 2
+    y1 = y_c - h / 2
+    x2 = x_c + w / 2
+    y2 = y_c + h / 2
+    
+    # Stack the coordinates in the last dimension
+    return torch.stack((x1, y1, x2, y2), dim=-1)
+
+
 
 
 def post_process_outputs(outputs, image_width = 512, image_height = 512):
@@ -85,3 +98,49 @@ def post_process_outputs(outputs, image_width = 512, image_height = 512):
     return torch.stack([x_min, y_min, x_max, y_max], dim=-1)
 
 # CHECK WHICH IS USEFUL TO KEEP AND REMOVE OTHERS
+
+def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_detections=100):
+    batch_size = bbox_coords.size(0)
+    # Prepare lists to hold tensors for each batch item
+    all_boxes = []
+    all_scores = []
+    all_class_probs = []
+
+    # Thresholds
+    score_threshold = 0.5
+    iou_threshold = 0.5
+
+    for i in range(batch_size):
+        # Filter detections based on the objectness score
+        indices = (obj_scores[i] > score_threshold).nonzero(as_tuple=True)[0]
+        filtered_boxes = bbox_coords[i][indices]
+        filtered_scores = obj_scores[i][indices]
+        filtered_class_probs = class_probs[i][indices]
+
+        # Compute the combined score (objectness * max class probability)
+        combined_scores = filtered_scores * filtered_class_probs.max(dim=1).values
+
+        # Apply NMS to reduce boxes based on IOU threshold
+        keep_indices = nms(filtered_boxes, combined_scores, iou_threshold)
+
+        # Limit the number of detections to max_detections
+        if len(keep_indices) > max_detections:
+            top_scores, top_indices = torch.topk(combined_scores[keep_indices], max_detections)
+            keep_indices = keep_indices[top_indices]
+
+        # Collect final selections for this batch item
+        all_boxes.append(filtered_boxes[keep_indices])
+        all_scores.append(filtered_scores[keep_indices])
+        all_class_probs.append(filtered_class_probs[keep_indices])
+
+    # Pad tensors in list to ensure all have the same size, enabling tensor concatenation
+    final_boxes = torch.nn.utils.rnn.pad_sequence(all_boxes, batch_first=True, padding_value=-1)
+    final_scores = torch.nn.utils.rnn.pad_sequence(all_scores, batch_first=True, padding_value=-1)
+    final_class_probs = torch.nn.utils.rnn.pad_sequence(all_class_probs, batch_first=True, padding_value=-1)
+
+    # Return a dictionary with batched detections
+    return {
+        'boxes': final_boxes,
+        'scores': final_scores,
+        'class_probs': final_class_probs
+    }

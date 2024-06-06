@@ -38,22 +38,35 @@ def pad_resize(img, target_size=512):
     return img
 
 def custom_collate_fn(batch):
-    images = [item['image_tensor'] for item in batch]
-    img_path = [item['img_path'] for item in batch]
-    boxes = [item['bboxes'] for item in batch]
-    labels = [item['category'] for item in batch]
+    max_detections = 100 
+    
+    # print(f"Number of items in batch: {len(batch)}")
+    # for item in batch:
+    #     print(f"Number of boxes in item: {len(item['bboxes'])}")
+        
+        
+    images = torch.stack([item['image_tensor'] for item in batch]) 
+    padded_boxes = torch.zeros((len(batch), max_detections, 4)) 
+    objectness_scores = torch.zeros((len(batch), max_detections)) 
+    padded_labels = torch.full((len(batch), max_detections), -1, dtype=torch.long)  
 
     
-    images = torch.stack(images, dim=0)
+    for i, item in enumerate(batch):
+        num_boxes = len(item['bboxes'])
+        if num_boxes > 0:
+            padded_boxes[i, :num_boxes] = torch.tensor(item['bboxes'])
+            objectness_scores[i, :num_boxes] = 1 
+            padded_labels[i, :num_boxes] = torch.tensor(item['category'])  
 
     return {
         'images': images,
-        'boxes': boxes, 
-        'labels': labels , 
-        'img_path' : img_path
+        'boxes': padded_boxes,
+        'objectness_scores': objectness_scores,
+        'labels': padded_labels,
+        'img_path': [item['img_path'] for item in batch]  # List of image paths
     }
 
-
+    
 class SARDet(Dataset):
     def __init__(self, data_dir,imgs:list, mode:str , target_size = 512):
         self.imgs_paths = imgs
@@ -93,9 +106,8 @@ class SARDet(Dataset):
         
         image_id = self.filename_to_id.get(self.imgs_paths[index])
         annotations = self.id_to_annotations.get(image_id, []) # empty list if nothing exist
-        
         bboxes = [list((coord/orig_size)*self.target_size for coord in anno['bbox']) for anno in annotations]
-
+        # print(f"Image {img_path} has {len(bboxes)} bounding boxes.")
         category_ids = [anno['category_id'] for anno in annotations]
         
         output = {

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 
 class DetectorHead(nn.Module):
-    def __init__(self ,in_channels ,  anchors , num_classes = 6 ,):
+    def __init__(self ,in_channels ,  anchors , num_classes = 7 ,): # -1 for the background
         super(DetectorHead, self).__init__()
         
         self.pred = nn.Conv2d(in_channels , anchors * (1+4+num_classes) , kernel_size = 3 , padding = 1)
@@ -14,7 +14,7 @@ class DetectorHead(nn.Module):
         return x
         
 class Detector(nn.Module):
-    def __init__(self , num_classes = 6):
+    def __init__(self , num_classes = 7):
         super(Detector, self).__init__()
         
         self.encoder_1 = nn.Sequential(   # 3 x 800 x 800 / 3 x 512 x 512 / 3 x 256 x 256
@@ -57,7 +57,7 @@ class Detector(nn.Module):
         x = self.detection(x)
         return x
 
-def decode_outputs(outputs, score_threshold=0.5, iou_threshold=0.5, num_classes=6, anchors=5):
+def decode_outputs(outputs, score_threshold=0.5, iou_threshold=0.5, num_classes=7, anchors=5):
     
     '''
     outputs: Tensor of size (B , anchor*(4+1+num_classes) , H , W)
