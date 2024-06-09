@@ -99,8 +99,6 @@ def post_process_outputs(outputs, image_width = 512, image_height = 512):
 
 # CHECK WHICH IS USEFUL TO KEEP AND REMOVE OTHERS
 
-import torch
-from torch.nn.utils.rnn import pad_sequence
 
 def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_detections=100):
     batch_size = bbox_coords.size(0)
@@ -116,35 +114,43 @@ def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_de
     for i in range(batch_size):
         # Filter detections based on the objectness score
         indices = (obj_scores[i] > score_threshold).nonzero(as_tuple=True)[0]
-        filtered_boxes = bbox_coords[i][indices]
-        filtered_scores = obj_scores[i][indices]
-        filtered_class_probs = class_probs[i][indices]
+        if indices.numel() == 0:
+            # Handle case with no detections
+            padded_boxes = torch.zeros((max_detections, 4), dtype=torch.float32, device=bbox_coords.device , requires_grad=True)
+            padded_scores = torch.zeros(max_detections, dtype=torch.float32, device=obj_scores.device , requires_grad=True)
+            padded_class_probs = torch.zeros((max_detections, num_classes), dtype=torch.float32, device=class_probs.device , requires_grad=True)
+        else:
+            filtered_boxes = bbox_coords[i][indices]
+            filtered_scores = obj_scores[i][indices]
+            filtered_class_probs = class_probs[i][indices]
 
-        # Compute the combined score (objectness * max class probability)
-        combined_scores = filtered_scores * filtered_class_probs.max(dim=1).values
+            # Compute the combined score (objectness * max class probability)
+            combined_scores = filtered_scores * filtered_class_probs.max(dim=1).values
 
-        # Apply NMS to reduce boxes based on IOU threshold
-        keep_indices = nms(filtered_boxes, combined_scores, iou_threshold)
+            # Apply NMS to reduce boxes based on IOU threshold
+            keep_indices = nms(filtered_boxes, combined_scores, iou_threshold)
 
-        # Ensure that exactly max_detections are kept
-        keep_count = keep_indices.shape[0]
-        if keep_count > max_detections:
-            # Keep only the top scoring detections if there are too many
-            top_scores, top_indices = torch.topk(combined_scores[keep_indices], max_detections)
-            keep_indices = keep_indices[top_indices]
-        elif keep_count < max_detections:
-            # Pad with zeros if there are too few
-            pad_count = max_detections - keep_count
-            keep_indices = torch.cat([
-                keep_indices,
-                torch.full((pad_count,), -1, dtype=torch.long, device=keep_indices.device)  # Use an invalid index
-            ])
+            # Ensure that exactly max_detections are kept
+            keep_count = keep_indices.shape[0]
+            if keep_count > max_detections:
+                print("no")
+                # Keep only the top scoring detections if there are too many
+                top_scores, top_indices = torch.topk(combined_scores[keep_indices], max_detections)
+                keep_indices = keep_indices[top_indices]
+            elif keep_count < max_detections:
+                # Pad with zeros if there are too few
+                pad_count = max_detections - keep_count
+                print("yes")
+                keep_indices = torch.cat([
+                    keep_indices,
+                    torch.full((pad_count,), -1, dtype=torch.long, device=keep_indices.device)  # Use an invalid index
+                ])
 
-        # Collect final selections for this batch item
-        padded_boxes = pad_tensor(filtered_boxes[keep_indices], max_detections, 0)
-        padded_scores = pad_tensor(filtered_scores[keep_indices], max_detections, 0)
-        padded_class_probs = pad_tensor(filtered_class_probs[keep_indices], max_detections, 6)  # Assuming '6' is a class index representing "no object"
-
+            # Collect final selections for this batch item
+            padded_boxes = pad_tensor(filtered_boxes[keep_indices], max_detections, 0)
+            padded_scores = pad_tensor(filtered_scores[keep_indices], max_detections, 0)
+            padded_class_probs = pad_tensor(filtered_class_probs[keep_indices], max_detections, num_classes)
+        
         all_boxes.append(padded_boxes)
         all_scores.append(padded_scores)
         all_class_probs.append(padded_class_probs)
@@ -155,16 +161,12 @@ def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_de
         'class_probs': torch.stack(all_class_probs)
     }
 
-def pad_tensor(tensor, max_len, pad_value):
-    # Pads tensor to max_len with pad_value
-    current_len = tensor.size(0)
-    pad_size = max_len - current_len
-    if pad_size > 0:
-        # Compute the shape of the padding tensor
-        padding_shape = [pad_size] + list(tensor.shape[1:])
-        # Create a padding tensor of the correct shape
-        padding = torch.full(padding_shape, pad_value, dtype=tensor.dtype, device=tensor.device)
-        # Concatenate the original tensor with the padding tensor
-        tensor = torch.cat([tensor, padding], dim=0)
+def pad_tensor(tensor, pad_size, pad_value):
+    """Pads tensor to specified size with pad_value."""
+    if tensor.size(0) < pad_size:
+        padding_size = pad_size - tensor.size(0)
+        pad_tensor = torch.full((padding_size, *tensor.shape[1:]), pad_value, dtype=tensor.dtype, device=tensor.device)
+        tensor = torch.cat([tensor, pad_tensor], dim=0)
     return tensor
+
 
