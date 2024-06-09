@@ -133,14 +133,12 @@ def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_de
             # Ensure that exactly max_detections are kept
             keep_count = keep_indices.shape[0]
             if keep_count > max_detections:
-                print("no")
                 # Keep only the top scoring detections if there are too many
                 top_scores, top_indices = torch.topk(combined_scores[keep_indices], max_detections)
                 keep_indices = keep_indices[top_indices]
             elif keep_count < max_detections:
                 # Pad with zeros if there are too few
                 pad_count = max_detections - keep_count
-                print("yes")
                 keep_indices = torch.cat([
                     keep_indices,
                     torch.full((pad_count,), -1, dtype=torch.long, device=keep_indices.device)  # Use an invalid index
