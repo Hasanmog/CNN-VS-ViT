@@ -73,6 +73,16 @@ def normalize_bboxes(gt_boxes, img_width, img_height):
         normalized_boxes.append(norm_boxes)
     return torch.tensor(normalized_boxes)
 
+def accuracy(predicted_probs, true_labels):
+    # Get the class with the highest probability for each prediction
+    predicted_labels = predicted_probs.argmax(dim=1)
+    # Calculate accuracy by comparing with true labels
+    correct = (predicted_labels == true_labels).sum().item()
+    total = true_labels.size(0)
+    accuracy = correct / total
+    return accuracy
+
+
 
 
 

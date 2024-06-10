@@ -100,7 +100,7 @@ def post_process_outputs(outputs, image_width = 512, image_height = 512):
 # CHECK WHICH IS USEFUL TO KEEP AND REMOVE OTHERS
 
 
-def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_detections=100):
+def process_detections(bbox_coords, obj_scores, class_probs, num_classes, max_detections=300):
     batch_size = bbox_coords.size(0)
     # Prepare lists to hold tensors for each batch item
     all_boxes = []

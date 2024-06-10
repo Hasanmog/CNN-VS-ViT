@@ -1,28 +1,41 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import neptune
+import json
 from torchvision.ops import complete_box_iou_loss
 from torch.optim import Adam , lr_scheduler
 from tqdm import tqdm
 from postprocessing import convert_to_mins_maxes , xywh_to_xyxy , post_process_outputs , process_detections
 from model import decode_outputs
 from torchvision.ops import nms
-from utils import  normalize_bboxes , bbox_iou
+from utils import  normalize_bboxes , bbox_iou , accuracy
 
 import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 def train(model , train_loader , val_loader ,
           epochs , lr , device , lr_schedule ,
+          out_dir , 
           num_boxes_coords = 4 , 
           num_classes = 7 , # -1 for background
           num_obj_score = 1 , 
           num_anchors = 5 , 
           neptune_config = None):
     
+    with open(neptune_config) as config_file:
+        config = json.load(config_file)
+        api_token = config.get('api_token')
+        project = config.get('project')
+
+    run = neptune.init_run(
+        project=project,  
+        api_token=api_token,
+    )
+    
+    
     model = model.to(device)
     optimizer = Adam(model.parameters() , lr = lr)
-    
     
     # Initialize the learning rate scheduler based on user input
     if lr_schedule == "onecyclelr":
@@ -38,6 +51,10 @@ def train(model , train_loader , val_loader ,
         
     for epoch in tqdm(range(epochs)):
         print(f"Current Epoch : {epoch}")
+        epoch_loss = 0
+        loss_class = 0
+        loss_obj = 0
+        loss_bbox = 0
         for idx , batch in enumerate(train_loader):
             model.train(True)
             images , gt_bbox , gt_obj_scores, gt_labels , path = batch['images'] , batch['boxes'] ,batch['objectness_scores'], batch['labels'] ,batch['img_path']
@@ -75,7 +92,7 @@ def train(model , train_loader , val_loader ,
             # TO BE CONTINUED AFTER CHECKING THE SHAPE OF EACH VARIABLE (add print statements after each line of code)
 
             detections_filtered = process_detections(bbox_coords=pred_bbox , obj_scores= obj_scores , class_probs=class_probs , 
-                                                     num_classes=7 , max_detections=100)  
+                                                     num_classes=7 , max_detections=300)  
             
             
             filtered_pred_bbox = detections_filtered['boxes'].to(device)
@@ -87,6 +104,7 @@ def train(model , train_loader , val_loader ,
                 gt_labels.view(-1)  # Flatten labels to [batch_size * max_detections]
             )
             class_loss = class_loss * 0.4
+            loss_class += class_loss
             class_loss.backward(retain_graph=True)
 
             obj_loss = torch.nn.functional.binary_cross_entropy(
@@ -95,19 +113,109 @@ def train(model , train_loader , val_loader ,
             )  
 
             obj_loss = obj_loss * 0.2
-            obj_loss.backward(retain_graph=True)          
+            loss_obj += obj_loss
+            obj_loss.backward(retain_graph=True) 
+            # print("filtered_pred_bbox" ,filtered_pred_bbox.view(-1, 4)) 
+            # print("gt" ,gt_bbox.view(-1, 4) )        
             bbox_loss = torch.nn.functional.smooth_l1_loss(
                 filtered_pred_bbox.view(-1, 4),  
-                gt_bbox.view(-1, 4)
+                gt_bbox.view(-1, 4) ####################### PROBLEM HERE #####################
             )
             bbox_loss = bbox_loss*0.4
+            loss_bbox += bbox_loss
             bbox_loss.backward()
-
+            run['batch class loss'].log(class_loss) # temporarily
+            run['batch bbox loss'].log(bbox_loss) # temp
+            run['batch obj loss'].log(obj_loss) #temp
+            batch_loss = class_loss + obj_loss + bbox_loss
+            epoch_loss+=batch_loss
             # loss.backward()
             optimizer.step()
+        lr_schedule.step()
+        # After each epoch
+        average_epoch_loss = epoch_loss / len(train_loader)
+        average_loss_bbox = loss_bbox / len(train_loader)
+        average_loss_class = loss_class / len(train_loader)
+        average_loss_obj = loss_obj / len(train_loader)
+
+        print(f"Average total loss for epoch {epoch} ---> {average_epoch_loss}")
+        print(f"Average bbox loss for epoch {epoch} ---> {average_loss_bbox}")
+        print(f"Average class loss for epoch {epoch} ---> {average_loss_class}")
+        print(f"Average object score loss for epoch {epoch} ---> {average_loss_obj}")
+
+        run['average total train loss'].log(average_epoch_loss)
+        run['average class loss'].log(average_loss_class)
+        run['average bbox loss'].log(average_loss_bbox)
+        run['average obj loss'].log(average_loss_obj)
+        
+        # Validation
+        model.eval()
+        iou_save = 0
+        acc_save = 0
+        val_iou = 0
+        val_acc = 0
+        for idx , batch in enumerate(val_loader):
+ 
+            images , gt_bbox , gt_obj_scores, gt_labels , path = batch['images'] , batch['boxes'] ,batch['objectness_scores'], batch['labels'] ,batch['img_path']
+            gt_bbox = normalize_bboxes(gt_boxes = gt_bbox , img_height= 512 , img_width=512)
+            gt_bbox = gt_bbox.to(device)
+            gt_labels = gt_labels.to(device)
+            gt_obj_scores = gt_obj_scores.to(device)
+            images = images.to(device)
+            with torch.no_grad():
+                outputs = model(images)
+                batch_size , attributes , grid_size , _ = outputs.shape
+                attributes_per_anchor = 4 + 1 + num_classes  
+                outputs = outputs.view(batch_size, num_anchors, attributes_per_anchor, grid_size, grid_size)
+                outputs = outputs.permute(0, 3, 4, 1, 2)  
+
+
+                bbox_coords = outputs[..., :num_boxes_coords]  
+                bbox_coords = torch.sigmoid(bbox_coords)
+                pred_bbox = bbox_coords.reshape(bbox_coords.size(0), -1, bbox_coords.size(-1))
+                pred_bbox = xywh_to_xyxy(pred_bbox)
+                
+                obj_scores = outputs[..., num_boxes_coords] 
+                obj_scores = torch.sigmoid(obj_scores)
+                obj_scores = obj_scores.reshape(batch_size, -1) 
+                
+                
+                class_probs = outputs[..., num_boxes_coords + 1:]
+                class_probs = F.softmax(class_probs, dim=-1)
+                class_probs = class_probs.reshape(batch_size, -1, num_classes)  
+
+                detections_filtered = process_detections(bbox_coords=pred_bbox , obj_scores= obj_scores , class_probs=class_probs , 
+                                                        num_classes=7 , max_detections=300)  
+                
+                
+                filtered_pred_bbox = detections_filtered['boxes'].to(device)
+                filtered_obj_scores = detections_filtered['scores'].to(device)
+                filtered_class_probs = detections_filtered['class_probs'].to(device)
             
-            
-            
+            batch_iou = bbox_iou(filtered_pred_bbox , gt_bbox)
+            batch_accuracy = accuracy(filtered_class_probs , gt_labels)
+            val_iou += batch_iou
+            val_acc += batch_accuracy
+        
+        val_average_iou = val_iou / len(val_loader)  
+        val_average_acc = val_acc / len(val_loader)
+        print(f"validation classification accuracy ---> {val_average_acc}")
+        print(f"validation bounding box IoU ---> {val_average_iou}")
+        run['validation accuracy'].log(val_average_acc)
+        run['validation IoU'].log(val_average_iou)
+ 
+        if iou_save < val_average_iou or acc_save < val_average_acc :
+            checkpoint_path = os.path.join(out_dir, f'best_checkpoint.pth')
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': lr_schedule.state_dict(),
+                'train_loss': epoch_loss,
+                'val_iou' : val_average_iou,
+                'val_acc' : val_average_acc , 
+            }, checkpoint_path)
+    
 '''
 - Implement:
             - Validation
@@ -116,4 +224,5 @@ def train(model , train_loader , val_loader ,
             
 - Clean the code
 - Code for Testing
+- Transform the training code processing into a function
 '''

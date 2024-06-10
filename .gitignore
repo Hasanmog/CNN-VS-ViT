@@ -17,3 +17,5 @@ Datasets
 neptune.json
 bbox_Matching_ Algorithm.py
 Object_Detection/__pycache__
+Object_Detection/Weights
+Object_Detection/.neptune

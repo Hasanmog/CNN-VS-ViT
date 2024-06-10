@@ -38,7 +38,7 @@ def pad_resize(img, target_size=512):
     return img
 
 def custom_collate_fn(batch):
-    max_detections = 100 
+    max_detections = 300 
     
     # print(f"Number of items in batch: {len(batch)}")
     # for item in batch:
