@@ -1,16 +1,18 @@
 import json
 import os
 import random
+import numpy as np
 import torch
 import torchvision as nn
 from PIL import Image
+from postprocessing import xywh_to_xyxy
 from torch.utils.data import Dataset
 from torchvision import  transforms
 from torchvision.transforms import ToTensor
 
 
 
-def pad_resize(img, target_size=512):
+def resize(img, target_size=512):
     # Get current dimensions from the image
     _, h, w = img.shape
 
@@ -37,40 +39,13 @@ def pad_resize(img, target_size=512):
 
     return img
 
-def custom_collate_fn(batch):
-    max_detections = 350 
-    
-    # print(f"Number of items in batch: {len(batch)}")
-    # for item in batch:
-    #     print(f"Number of boxes in item: {len(item['bboxes'])}")
-        
-        
-    images = torch.stack([item['image_tensor'] for item in batch]) 
-    padded_boxes = torch.zeros((len(batch), max_detections, 4)) 
-    objectness_scores = torch.zeros((len(batch), max_detections)) 
-    padded_labels = torch.full((len(batch), max_detections), 6, dtype=torch.long)  
-
-    
-    for i, item in enumerate(batch):
-        num_boxes = len(item['bboxes'])
-        if num_boxes > 0:
-            padded_boxes[i, :num_boxes] = torch.tensor(item['bboxes'])
-            objectness_scores[i, :num_boxes] = 1 
-            padded_labels[i, :num_boxes] = torch.tensor(item['category'])  
-
-    return {
-        'images': images,
-        'boxes': padded_boxes,
-        'objectness_scores': objectness_scores,
-        'labels': padded_labels,
-        'img_path': [item['img_path'] for item in batch]  # List of image paths
-    }
-
-    
+   
 class SARDet(Dataset):
-    def __init__(self, data_dir,imgs:list, mode:str , target_size = 512):
+    def __init__(self, data_dir,imgs:list, mode:str , target_size = 512 , stride = 16 , num_classes = 6):
         self.imgs_paths = imgs
         self.target_size = target_size
+        self.num_classes = num_classes
+        self.stride = stride # related to the downsampling process of the model (check the dimension of the output)
         anno_file = 'train.json' if mode in ["train", "test"] else 'val.json'
         with open(os.path.join(data_dir, anno_file), 'r') as file:
             self.anno = json.load(file)
@@ -93,7 +68,9 @@ class SARDet(Dataset):
                     'bbox': anno['bbox'],
                     'category_id': anno['category_id']
                 }]
-
+                
+        self.grid_height = target_size // stride
+        self.grid_width = target_size // stride
     def __len__(self):
         return len(self.imgs_paths)
     
@@ -102,22 +79,49 @@ class SARDet(Dataset):
         img = Image.open(img_path).convert('RGB')
         orig_size = img.size[0]
         img = self.transform(img)
-        img = pad_resize(img , target_size=self.target_size)
+        img = resize(img , target_size=self.target_size)
         
         image_id = self.filename_to_id.get(self.imgs_paths[index])
-        annotations = self.id_to_annotations.get(image_id, []) # empty list if nothing exist
-        bboxes = [list((coord/orig_size)*self.target_size for coord in anno['bbox']) for anno in annotations]
-        # print(f"Image {img_path} has {len(bboxes)} bounding boxes.")
-        category_ids = [anno['category_id'] for anno in annotations]
+        annotations = self.id_to_annotations.get(image_id, [])
         
-        output = {
-            "image_tensor" : img , 
-            "img_path" : img_path , 
-            "bboxes" : bboxes , 
-            "category" : category_ids
-        }
+        # gt should contain regression map  , class map , centerness score
         
-        return output
+        regression_map = torch.zeros((4, self.grid_height, self.grid_width))
+        classification_map = torch.zeros((self.num_classes, self.grid_height, self.grid_width))
+        centerness_map = torch.zeros((1, self.grid_height, self.grid_width))
+        
+        for anno in annotations:
+            bbox = np.array(anno['bbox'])
+            category_id = anno['category_id']
+            x0, y0, w, h = bbox
+            x1 = x0 + w
+            y1 = y0 + h
+            cx = (x0 + x1) / 2
+            cy = (y0 + y1) / 2
+            
+            grid_x0 = int(x0 / orig_size * self.grid_width)
+            grid_y0 = int(y0 / orig_size * self.grid_height)
+            grid_x1 = int(x1 / orig_size * self.grid_width)
+            grid_y1 = int(y1 / orig_size * self.grid_height)
+            grid_cx = int(cx / orig_size * self.grid_width)
+            grid_cy = int(cy / orig_size * self.grid_height)
+            
+            l = (cx - x0) / self.stride
+            t = (cy - y0) / self.stride
+            r = (x1 - cx) / self.stride
+            b = (y1 - cy) / self.stride
+            
+            regression_map[:, grid_cy, grid_cx] = torch.tensor([l, t, r, b])
+            classification_map[category_id, grid_cy, grid_cx] = 1
+            
+            left = grid_cx - grid_x0
+            top = grid_cy - grid_y0
+            right = grid_x1 - grid_cx
+            bottom = grid_y1 - grid_cy
+            centerness = np.sqrt((min(left, right) / max(left, right)) * (min(top, bottom) / max(top, bottom)))
+            centerness_map[0, grid_cy, grid_cx] = centerness
+        
+        return img, regression_map, classification_map, centerness_map
 
 
 
