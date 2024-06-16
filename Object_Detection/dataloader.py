@@ -98,6 +98,7 @@ class SARDet(Dataset):
             y1 = y0 + h
             cx = (x0 + x1) / 2
             cy = (y0 + y1) / 2
+            epsilon = 1e-6
             
             grid_x0 = int(x0 / orig_size * self.grid_width)
             grid_y0 = int(y0 / orig_size * self.grid_height)
@@ -114,10 +115,11 @@ class SARDet(Dataset):
             regression_map[:, grid_cy, grid_cx] = torch.tensor([l, t, r, b])
             classification_map[category_id, grid_cy, grid_cx] = 1
             
-            left = grid_cx - grid_x0
-            top = grid_cy - grid_y0
-            right = grid_x1 - grid_cx
-            bottom = grid_y1 - grid_cy
+            left = max(grid_cx - grid_x0 , epsilon)
+            top = max(grid_cy - grid_y0 , epsilon)
+            right = max(grid_x1 - grid_cx , epsilon)
+            bottom = max(grid_y1 - grid_cy , epsilon)
+            
             centerness = np.sqrt((min(left, right) / max(left, right)) * (min(top, bottom) / max(top, bottom)))
             centerness_map[0, grid_cy, grid_cx] = centerness
         
