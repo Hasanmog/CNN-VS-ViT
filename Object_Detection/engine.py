@@ -96,6 +96,16 @@ def train(model , train_loader , val_loader ,
         print(f"Epoch cls Loss ---> {total_cls_loss}")
         print(f"Epoch center Loss ---> {total_loss_center}")
         print(f"Epoch regression Loss ---> {total_reg_loss}")
+        checkpoint_path = os.path.join(out_dir, f'train_{epoch}_checkpoint.pth')
+        torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': lr_schedule.state_dict(),
+                'train_loss': epoch_loss,
+            }, checkpoint_path)
+        
+        
         
         print("-----------------------")
         print(f"Validation for epoch {epoch}")
