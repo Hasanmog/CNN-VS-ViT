@@ -45,7 +45,7 @@ class SARDet(Dataset):
         self.imgs_paths = imgs
         self.target_size = target_size
         self.num_classes = num_classes
-        self.stride = stride # related to the downsampling process of the model (check the dimension of the output)
+        self.stride = stride # my output feature map is 32 --> 512 / 32 = 16
         anno_file = 'train.json' if mode in ["train", "test"] else 'val.json'
         with open(os.path.join(data_dir, anno_file), 'r') as file:
             self.anno = json.load(file)
@@ -85,21 +85,24 @@ class SARDet(Dataset):
         annotations = self.id_to_annotations.get(image_id, [])
         
         # gt should contain regression map  , class map , centerness score
-        
+        #initialize the three maps
         regression_map = torch.zeros((4, self.grid_height, self.grid_width))
         classification_map = torch.zeros((self.num_classes, self.grid_height, self.grid_width))
         centerness_map = torch.zeros((1, self.grid_height, self.grid_width))
         
         for anno in annotations:
-            bbox = np.array(anno['bbox'])
-            category_id = anno['category_id']
+            bbox = np.array(anno['bbox']) #extracted bbox
+            category_id = anno['category_id'] # extracted category
             x0, y0, w, h = bbox
-            x1 = x0 + w
+            # change to x0,y0,x1,y1
+            x1 = x0 + w 
             y1 = y0 + h
-            cx = (x0 + x1) / 2
+            # center coordinates of the bounding box
+            cx = (x0 + x1) / 2 
             cy = (y0 + y1) / 2
             epsilon = 1e-6
             
+            # bbox from 512 x 512 to 32 x 32
             grid_x0 = int(x0 / orig_size * self.grid_width)
             grid_y0 = int(y0 / orig_size * self.grid_height)
             grid_x1 = int(x1 / orig_size * self.grid_width)

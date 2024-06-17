@@ -74,21 +74,21 @@ class Detector(nn.Module):
             nn.BatchNorm2d(256),
             )
         self.encoder_6 = nn.Sequential(
-            nn.Conv2d(256 , 512 , kernel_size = 2), # 512 x 248 x 248
+            nn.Conv2d(256 , 512 , kernel_size = 4 , stride = 2), # 512 x 248 x 248
             nn.ReLU(),
             nn.BatchNorm2d(512),
             )
         
-        self.encoder_7 = nn.Sequential(
-            nn.Conv2d(512 , 512 , kernel_size = 3 , stride = 2), # 512 x 124 x 124
-            nn.ReLU(),
-            nn.BatchNorm2d(512),
-            )
+        # self.encoder_7 = nn.Sequential(
+        #     nn.Conv2d(512 , 512 , kernel_size = 3 , stride = 2), # 512 x 124 x 124
+        #     nn.ReLU(),
+        #     nn.BatchNorm2d(512),
+        #     )
         
         self.detection = DetectorHead(512 , num_classes = num_classes)
         
     def forward(self , x):
-        encoders = [self.encoder_1 , self.encoder_2 , self.encoder_3 , self.encoder_4 , self.encoder_5 , self.encoder_6 , self.encoder_7]
+        encoders = [self.encoder_1 , self.encoder_2 , self.encoder_3 , self.encoder_4 , self.encoder_5 , self.encoder_6]
         for encoder_layer in encoders:
             x = encoder_layer(x)   
             
