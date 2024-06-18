@@ -1,1 +1,1 @@
-# paper2code
+# Computer Vision CNN-VS-VIT

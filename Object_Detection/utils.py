@@ -30,7 +30,11 @@ def calculate_accuracy(cls_pred, cls_true):
 
 
 def calculate_iou(box1, box2):
-    # box1 and box2 are expected to be of shape [N, 4] with each row in format (x1, y1, x2, y2)
+    """
+    Calculate the Intersection over Union (IoU) between two sets of boxes.
+    box1 and box2 are expected to be of shape [N, 4] with each row in format (x1, y1, x2, y2)
+    Returns the IoU for each pair of boxes.
+    """
     x1 = torch.max(box1[:, 0], box2[:, 0])
     y1 = torch.max(box1[:, 1], box2[:, 1])
     x2 = torch.min(box1[:, 2], box2[:, 2])
@@ -41,7 +45,9 @@ def calculate_iou(box1, box2):
     box2_area = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
     union_area = box1_area + box2_area - inter_area
     
-    return inter_area / union_area
+    iou = inter_area / union_area
+    return iou
+
 
 def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold):
     ious = calculate_iou(pred_boxes, true_boxes)

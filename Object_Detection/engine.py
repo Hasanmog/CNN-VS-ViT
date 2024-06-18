@@ -15,6 +15,7 @@ from utils import calculate_accuracy , calculate_iou , calculate_precision_recal
 def train(model , train_loader , val_loader ,
           epochs , lr , device , lr_schedule ,
           out_dir , 
+          accum_steps = 4 , 
           neptune_config = None):
     
     with open(neptune_config) as config_file:
@@ -61,33 +62,37 @@ def train(model , train_loader , val_loader ,
                 
                 regression_loss = F.smooth_l1_loss(reg_pred , regression)
                 loss_reg += regression_loss.item()
-                scaler.scale(regression_loss).backward(retain_graph=True)
                 run['regression_loss'].log(regression_loss)
                 
                 center_loss = F.binary_cross_entropy_with_logits(center_pred , centerness)
                 loss_center += center_loss.item()
-                scaler.scale(center_loss).backward(retain_graph=True)
                 run['center_loss'].log(center_loss)
                 
                 cls_loss = sigmoid_focal_loss(cls_pred , cls , alpha=0.25, gamma=2.0, reduction='mean') 
                 loss_class += cls_loss.item()
-                scaler.scale(cls_loss).backward()
                 run['cls_loss'].log(cls_loss)
-                batch_loss = cls_loss + center_loss + regression_loss
+                
+                batch_loss = cls_loss*0.4 + center_loss *0.2 + regression_loss*0.4
+                run['batch_loss'].log(batch_loss)
+                scaler.scale(batch_loss).backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 epoch_loss += batch_loss
                 print(f"Batch Loss ---> {batch_loss}")
                 print(f"Batch cls Loss ---> {loss_class}")
                 print(f"Batch center Loss ---> {loss_center}")
                 print(f"Batch regression Loss ---> {loss_reg}")
-                
-            
+                run['lr'].log(lr_schedule.get_last_lr()[0])
+                # if (idx + 1) % accum_steps== 0:
                 scaler.step(optimizer)
                 scaler.update()
+                optimizer.zero_grad()
+                if lr_schedule == 'onecyclelr':
+                    lr_schedule.step()
+                        
             if lr_schedule == 'onecyclelr':
                 lr_schedule.step()
         if lr_schedule != 'onecyclelr':
             lr_schedule.step()
-        run['lr'].log(lr_schedule.get_last_lr()[0])
         print(f"Epoch Loss ---> {epoch_loss/len(train_loader)}")
         run['Epoch Loss'].log(epoch_loss)
         total_cls_loss = loss_class/len(train_loader)
@@ -124,7 +129,10 @@ def train(model , train_loader , val_loader ,
                 
             # Calculate metrics
                 accuracy = calculate_accuracy(cls_pred, cls)
-                iou = calculate_iou(reg_pred , regression , 0.5)
+                print("pred shape" , reg_pred.shape)
+                print("ground truth" , regression.shape)
+                iou = calculate_iou(reg_pred , regression)
+                print("iou" , iou)
                 ious+=iou
                 precision_05, recall_05 = calculate_precision_recall(reg_pred, regression, 0.5)
                 precision_07, recall_07 = calculate_precision_recall(reg_pred, regression, 0.7)
