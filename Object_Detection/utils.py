@@ -29,24 +29,49 @@ def calculate_accuracy(cls_pred, cls_true):
     return correct / total
 
 
-def calculate_iou(box1, box2):
+def calculate_iou(pred_boxes, gt_boxes):
     """
-    Calculate the Intersection over Union (IoU) between two sets of boxes.
-    box1 and box2 are expected to be of shape [N, 4] with each row in format (x1, y1, x2, y2)
-    Returns the IoU for each pair of boxes.
+    Calculate the Intersection over Union (IoU) between batches of predicted and ground truth bounding boxes.
+    pred_boxes and gt_boxes are expected to be of shape [batch_size, N, 4] with each box in format (x1, y1, x2, y2)
+    Returns the IoU for each pair of boxes in the batch.
     """
-    x1 = torch.max(box1[:, 0], box2[:, 0])
-    y1 = torch.max(box1[:, 1], box2[:, 1])
-    x2 = torch.min(box1[:, 2], box2[:, 2])
-    y2 = torch.min(box1[:, 3], box2[:, 3])
-    
-    inter_area = torch.clamp(x2 - x1, min=0) * torch.clamp(y2 - y1, min=0)
-    box1_area = (box1[:, 2] - box1[:, 0]) * (box1[:, 3] - box1[:, 1])
-    box2_area = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
-    union_area = box1_area + box2_area - inter_area
-    
-    iou = inter_area / union_area
-    return iou
+    pred_boxes = pred_boxes.to('cpu')
+    gt_boxes = gt_boxes.to('cpu')
+    batch_size = pred_boxes.size(0)
+    ious = []
+    for i in range(batch_size):
+        box1 = pred_boxes[i]
+        box2 = gt_boxes[i]
+        
+        print(f"box1: {box1}")
+        print(f"box2: {box2}")
+
+        x1 = torch.max(box1[:, 0].unsqueeze(1), box2[:, 0].unsqueeze(0))
+        y1 = torch.max(box1[:, 1].unsqueeze(1), box2[:, 1].unsqueeze(0))
+        x2 = torch.min(box1[:, 2].unsqueeze(1), box2[:, 2].unsqueeze(0))
+        y2 = torch.min(box1[:, 3].unsqueeze(1), box2[:, 3].unsqueeze(0))
+        
+        print(f"x1: {x1}")
+        print(f"y1: {y1}")
+        print(f"x2: {x2}")
+        print(f"y2: {y2}")
+        
+        inter_area = torch.clamp(x2 - x1, min=0) * torch.clamp(y2 - y1, min=0)
+        box1_area = (box1[:, 2] - box1[:, 0]) * (box1[:, 3] - box1[:, 1])
+        box2_area = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
+        union_area = box1_area.unsqueeze(1) + box2_area.unsqueeze(0) - inter_area
+        
+        print(f"inter_area: {inter_area}")
+        print(f"box1_area: {box1_area}")
+        print(f"box2_area: {box2_area}")
+        print(f"union_area: {union_area}")
+        
+        iou = inter_area / union_area
+        print(f"iou: {iou}")
+        ious.append(iou)
+
+    return torch.stack(ious)
+
 
 
 def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold):
@@ -57,5 +82,13 @@ def calculate_precision_recall(pred_boxes, true_boxes, iou_threshold):
     return precision, recall
 
 
-
+def extract_bounding_boxes(pred, ground_truth):
+    # Assuming pred and ground_truth are in the format [batch_size, num_channels, height, width]
+    # Convert the feature maps to bounding box coordinates
+    # This is an example and will depend on your specific model's output
+    batch_size = pred.size(0)
+    num_boxes = pred.size(2) * pred.size(3)  # Example, assuming each grid cell predicts one box
+    pred_boxes = pred.permute(0, 2, 3, 1).contiguous().view(batch_size, num_boxes, 4)
+    ground_truth_boxes = ground_truth.permute(0, 2, 3, 1).contiguous().view(batch_size, num_boxes, 4)
+    return pred_boxes, ground_truth_boxes
 

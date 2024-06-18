@@ -10,7 +10,7 @@ from torch.optim import Adam , lr_scheduler
 from tqdm import tqdm
 from postprocessing import convert_to_mins_maxes , xywh_to_xyxy 
 from torchvision.ops import nms
-from utils import calculate_accuracy , calculate_iou , calculate_precision_recall
+from utils import calculate_accuracy , calculate_iou , calculate_precision_recall , extract_bounding_boxes
 
 def train(model , train_loader , val_loader ,
           epochs , lr , device , lr_schedule ,
@@ -78,9 +78,9 @@ def train(model , train_loader , val_loader ,
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 epoch_loss += batch_loss
                 print(f"Batch Loss ---> {batch_loss}")
-                print(f"Batch cls Loss ---> {loss_class}")
-                print(f"Batch center Loss ---> {loss_center}")
-                print(f"Batch regression Loss ---> {loss_reg}")
+                print(f"Batch cls Loss ---> {cls_loss}")
+                print(f"Batch center Loss ---> {center_loss}")
+                print(f"Batch regression Loss ---> {regression_loss}")
                 run['lr'].log(lr_schedule.get_last_lr()[0])
                 # if (idx + 1) % accum_steps== 0:
                 scaler.step(optimizer)
@@ -126,12 +126,10 @@ def train(model , train_loader , val_loader ,
             with torch.no_grad():
                 
                 cls_pred , reg_pred , center_pred = model(img)
-                
             # Calculate metrics
                 accuracy = calculate_accuracy(cls_pred, cls)
-                print("pred shape" , reg_pred.shape)
-                print("ground truth" , regression.shape)
-                iou = calculate_iou(reg_pred , regression)
+                pred_boxes, gt_boxes = extract_bounding_boxes(reg_pred, regression)
+                iou = calculate_iou(pred_boxes , gt_boxes)
                 print("iou" , iou)
                 ious+=iou
                 precision_05, recall_05 = calculate_precision_recall(reg_pred, regression, 0.5)
