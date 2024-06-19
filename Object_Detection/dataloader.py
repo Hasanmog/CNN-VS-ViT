@@ -8,32 +8,30 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 def normalize_bbox(bbox, orig_size, target_size, stride):
-    '''
-    function for: 
-    - changing the xywh coordinates to xyxy
-    - calculating the center cooridnates of the bounding box
-    - normalizing the bounding box and center coordinates for a feature map with stride
-    
-    Returns : 
-    normalized bounding box coordinates and center coordinates(used for classification map)
-    
-    '''
     x0, y0, w, h = bbox
-    # change to x0,y0,x1,y1
     x1 = x0 + w
     y1 = y0 + h
 
     cx = (x0 + x1) / 2
-    cy = (y0 + y1) /2
-    # grid coordinates for feature map (32 x 32)
+    cy = (y0 + y1) / 2
+
+    # Calculate grid coordinates
     grid_x0 = int(x0 / orig_size * (target_size // stride))
     grid_y0 = int(y0 / orig_size * (target_size // stride))
     grid_x1 = int(x1 / orig_size * (target_size // stride))
     grid_y1 = int(y1 / orig_size * (target_size // stride))
-    
-    # needed for classifcation map
+
+    # Clamp grid coordinates to be within valid range
+    grid_x0 = max(0, min(grid_x0, target_size // stride - 1))
+    grid_y0 = max(0, min(grid_y0, target_size // stride - 1))
+    grid_x1 = max(0, min(grid_x1, target_size // stride - 1))
+    grid_y1 = max(0, min(grid_y1, target_size // stride - 1))
+
     grid_cx = int(cx / orig_size * (target_size // stride))
     grid_cy = int(cy / orig_size * (target_size // stride))
+
+    grid_cx = max(0, min(grid_cx, target_size // stride - 1))
+    grid_cy = max(0, min(grid_cy, target_size // stride - 1))
 
     return grid_x0, grid_y0, grid_x1, grid_y1, grid_cx, grid_cy
 

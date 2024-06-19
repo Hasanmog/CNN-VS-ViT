@@ -10,7 +10,7 @@ from torch.optim import Adam , lr_scheduler
 from tqdm import tqdm
 from postprocessing import convert_to_mins_maxes , xywh_to_xyxy 
 from torchvision.ops import nms
-from utils import calculate_accuracy , calculate_iou , calculate_precision_recall , extract_bounding_boxes
+from utils import calculate_accuracy , calculate_iou , calculate_precision_recall , extract_bounding_boxes , regression_map_to_boxes
 
 def train(model , train_loader , val_loader ,
           epochs , lr , device , lr_schedule ,
@@ -41,7 +41,7 @@ def train(model , train_loader , val_loader ,
     else:
         lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
         
-    save = 0
+    saver = 0
     for epoch in tqdm(range(epochs)):
         print(f"Current Epoch : {epoch}")
         epoch_loss , loss_class , loss_reg , loss_center = 0 , 0 , 0 , 0 
@@ -94,7 +94,7 @@ def train(model , train_loader , val_loader ,
         if lr_schedule != 'onecyclelr':
             lr_schedule.step()
         print(f"Epoch Loss ---> {epoch_loss/len(train_loader)}")
-        run['Epoch Loss'].log(epoch_loss)
+        run['Epoch Loss'].log(epoch_loss/len(train_loader))
         total_cls_loss = loss_class/len(train_loader)
         total_loss_center = loss_center/len(train_loader)
         total_reg_loss = loss_reg/len(train_loader)
@@ -115,8 +115,9 @@ def train(model , train_loader , val_loader ,
         print("-----------------------")
         print(f"Validation for epoch {epoch}")
         model.eval()
-        ious = 0
+        ious = []
         for idx , batch in enumerate(val_loader):
+            print(f"Current batch : {idx}")
             img , regression , cls , centerness = batch
             img = img.to(device)
             regression = regression.to(device)
@@ -128,10 +129,10 @@ def train(model , train_loader , val_loader ,
                 cls_pred , reg_pred , center_pred = model(img)
             # Calculate metrics
                 accuracy = calculate_accuracy(cls_pred, cls)
-                pred_boxes, gt_boxes = extract_bounding_boxes(reg_pred, regression)
+                pred_boxes = regression_map_to_boxes(reg_pred , stride = 16)
+                gt_boxes = regression_map_to_boxes(regression , stride = 16)
                 iou = calculate_iou(pred_boxes , gt_boxes)
-                print("iou" , iou)
-                ious+=iou
+                # ious.append(avg_batch_iou)
                 precision_05, recall_05 = calculate_precision_recall(reg_pred, regression, 0.5)
                 precision_07, recall_07 = calculate_precision_recall(reg_pred, regression, 0.7)
                 precision_09, recall_09 = calculate_precision_recall(reg_pred, regression, 0.9)
@@ -146,8 +147,8 @@ def train(model , train_loader , val_loader ,
                 run['precision@0.9'].log(precision_09)
                 run['recall@0.9'].log(recall_09)
                 
-        avg_iou = ious/len(val_loader)
-        if avg_iou > save :
+        avg_iou = sum(ious)/len(ious)
+        if avg_iou > saver :
             checkpoint_path = os.path.join(out_dir, f'best_checkpoint.pth')
             torch.save({
                 'epoch': epoch + 1,
@@ -158,7 +159,7 @@ def train(model , train_loader , val_loader ,
                 'val_acc': accuracy,
                 'val_IoU' : iou
             }, checkpoint_path)
-            save = avg_iou
+            saver = avg_iou
         log_json = {
             'epoch' : epoch , 
             'lr' : lr_schedule.get_last_lr()[0] , 
