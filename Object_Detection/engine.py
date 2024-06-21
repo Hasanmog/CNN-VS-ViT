@@ -34,7 +34,7 @@ def train(model , train_loader , val_loader ,
     elif lr_schedule == "step_lr":
         lr_schedule = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     else:
-        lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.97)
+        lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
     
     run = neptune.init_run(
         project=project,  
