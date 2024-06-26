@@ -25,10 +25,10 @@ def train(model , train_loader , val_loader ,
 
     model = model.to(device)
     optimizer = Adam([
-    {'params': model.detection.cls_head.parameters(), 'lr': lr_cls},
-    {'params': model.detection.regression_head.parameters(), 'lr': lr_reg},
-    {'params': model.detection.centerness_head.parameters(), 'lr': lr_center},
-])
+        {'params': model.class_head.parameters(), 'lr': lr_cls},
+        {'params': model.regression_head.parameters(), 'lr': lr_reg},
+        {'params': model.center_head.parameters(), 'lr': lr_center},
+    ])
     scaler = GradScaler()
     if lr_schedule == "onecyclelr":
         lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=1e-6, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)

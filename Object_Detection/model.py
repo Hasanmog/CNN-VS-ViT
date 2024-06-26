@@ -3,9 +3,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class DetectorHead(nn.Module):
+class Regression_Head(nn.Module):
     def __init__(self , hidden_dim , num_classes = 6): 
-        super(DetectorHead, self).__init__()
+        super(Regression_Head, self).__init__()
+        
+        self.hidden_dim = hidden_dim
+        self.num_classes = num_classes
+        
+        self.regression_head = nn.Sequential(
+            nn.Conv2d(hidden_dim, 128, kernel_size=3, stride=2, padding=1),  
+            nn.ReLU(), 
+            nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1),  
+            nn.ReLU(),
+            nn.Conv2d(64, 4, kernel_size=3, stride=1, padding=1), 
+            nn.Conv2d(4, 4, kernel_size=2, stride=1, padding=1)  
+        )
+        
+    def forward(self , x):
+        
+        regression = self.regression_head(x)
+        return  regression 
+    
+class Classification_Head(nn.Module):
+    def __init__(self , hidden_dim , num_classes = 6): 
+        super(Classification_Head, self).__init__()
         
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
@@ -19,31 +40,32 @@ class DetectorHead(nn.Module):
             nn.Conv2d(num_classes, num_classes, kernel_size=2, stride=1, padding=1)  
         )
         
-        self.regression_head = nn.Sequential(
-            nn.Conv2d(hidden_dim, 128, kernel_size=3, stride=2, padding=1),  
-            nn.ReLU(), 
-            nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1),  
-            nn.ReLU(),
-            nn.Conv2d(64, 4, kernel_size=3, stride=1, padding=1), 
-            nn.Conv2d(4, 4, kernel_size=2, stride=1, padding=1)  
-        )
+    def forward(self , x):
         
-        self.centerness_head = nn.Sequential(
+        classification = self.cls_head(x)
+        return  classification
+    
+class Centerness_Head(nn.Module):
+    def __init__(self , hidden_dim , num_classes = 6): 
+        super(Centerness_Head, self).__init__()
+        
+        self.hidden_dim = hidden_dim
+        self.num_classes = num_classes
+        
+        self.center_head = nn.Sequential(
             nn.Conv2d(hidden_dim, 128, kernel_size=3, stride=2, padding=1),  
             nn.ReLU(), 
             nn.Conv2d(128, 64, kernel_size=3, stride=2, padding=1),  
             nn.ReLU(),
             nn.Conv2d(64, 1, kernel_size=3, stride=1, padding=1),  
             nn.Conv2d(1, 1, kernel_size=2, stride=1, padding=1)  
-        )
+        )    
         
     def forward(self , x):
         
-        cls = self.cls_head(x)
-        regression = self.regression_head(x)
-        centerness = self.centerness_head(x)
-        return cls , regression , centerness
-        
+        centerness = self.center_head(x)
+        return  centerness
+
 class Detector(nn.Module):
     def __init__(self , num_classes = 6):
         super(Detector, self).__init__()
@@ -79,42 +101,35 @@ class Detector(nn.Module):
             nn.BatchNorm2d(512),
             )
         
-        # self.encoder_7 = nn.Sequential(
-        #     nn.Conv2d(512 , 512 , kernel_size = 3 , stride = 2), # 512 x 124 x 124
-        #     nn.ReLU(),
-        #     nn.BatchNorm2d(512),
-        #     )
-         # Detection heads for each encoder layer output
-        self.detection_heads = nn.ModuleList([
-            DetectorHead(16, num_classes),
-            DetectorHead(32, num_classes),
-            DetectorHead(64, num_classes),
-            DetectorHead(128, num_classes),
-            DetectorHead(256, num_classes),
-            DetectorHead(512, num_classes)
+        self.regression_head = nn.ModuleList([
+            Regression_Head(16, num_classes),
+            Regression_Head(32, num_classes),
+            Regression_Head(64, num_classes),
+            Regression_Head(128, num_classes),
+            Regression_Head(256, num_classes),
+            Regression_Head(512, num_classes)
         ])
+        self.class_head = Classification_Head(512 , num_classes)
+        self.center_head = Centerness_Head(512 , num_classes)
         
     def forward(self, x):
         encoders = [self.encoder_1, self.encoder_2, self.encoder_3, self.encoder_4, self.encoder_5, self.encoder_6]
         
-        cls_list, reg_list, center_list = [], [], []
+        reg_list = []
         
         for i, encoder_layer in enumerate(encoders):
             x = encoder_layer(x)
-            cls, regression, centerness = self.detection_heads[i](x)
+            regression = self.regression_head[i](x)
             
             # Resize to the fixed size of 32x32
-            cls_resized = nn.functional.interpolate(cls, size=(32, 32), mode='bilinear', align_corners=False)
             reg_resized = nn.functional.interpolate(regression, size=(32, 32), mode='bilinear', align_corners=False)
-            center_resized = nn.functional.interpolate(centerness, size=(32, 32), mode='bilinear', align_corners=False)
             
-            cls_list.append(cls_resized)
             reg_list.append(reg_resized)
-            center_list.append(center_resized)
+            
+        reg = torch.mean(torch.stack(reg_list), dim=0)
         
-        # Aggregate the results from different scales
-        mean_cls = torch.mean(torch.stack(cls_list), dim=0)
-        mean_reg = torch.mean(torch.stack(reg_list), dim=0)
-        mean_center = torch.mean(torch.stack(center_list), dim=0)
+        # Use the last encoder layer's output for classification and centerness heads
+        cls = self.class_head(x)
+        center = self.center_head(x)
         
-        return mean_cls, mean_reg, mean_center
+        return cls, reg, center
