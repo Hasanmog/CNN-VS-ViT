@@ -13,7 +13,7 @@ from torchvision.ops import nms
 from utils import calculate_accuracy , calculate_iou , calculate_precision_recall , extract_bounding_boxes , regression_map_to_boxes
 
 def train(model , train_loader , val_loader ,
-          epochs , lr , device , lr_schedule ,
+          epochs , lr_cls , lr_reg , lr_center , device , lr_schedule ,
           out_dir ,   
           accum_steps = 4 , 
           neptune_config = None):
@@ -24,23 +24,28 @@ def train(model , train_loader , val_loader ,
         project = config.get('project')
 
     model = model.to(device)
-    optimizer = Adam(model.parameters() , lr = lr)
+    optimizer = Adam([
+    {'params': model.detection.cls_head.parameters(), 'lr': lr_cls},
+    {'params': model.detection.regression_head.parameters(), 'lr': lr_reg},
+    {'params': model.detection.centerness_head.parameters(), 'lr': lr_center},
+])
     scaler = GradScaler()
-    # Initialize the learning rate scheduler based on user input
     if lr_schedule == "onecyclelr":
-        lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
+        lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=1e-6, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
     elif lr_schedule == "multi_step_lr":
         lr_schedule = lr_scheduler.MultiStepLR(optimizer, milestones=[5, 10, 15, 20, 25, 30, 35, 40], gamma=0.2)
     elif lr_schedule == "step_lr":
         lr_schedule = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    elif lr_schedule == "cosineanneal":
+        lr_schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50)
     else:
-        lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
+        lr_schedule = lr_scheduler.ExponentialLR(optimizer, gamma=0.994)
     
     run = neptune.init_run(
         project=project,  
         api_token=api_token,
     )  
-    saver = 0
+    saver , saver_acc = 0 , 0
     for epoch in tqdm(range(epochs)):
         print(f"Current Epoch : {epoch}")
         epoch_loss , loss_class , loss_reg , loss_center = 0 , 0 , 0 , 0 
@@ -55,10 +60,13 @@ def train(model , train_loader , val_loader ,
             cls = cls.to(device)
             centerness = centerness.to(device)
             optimizer.zero_grad()
-            
+            wclass = 0.4
+            wregress = 0.4
+            wcenter = 0.2
             with autocast():
                 cls_pred , reg_pred , center_pred = model(img)
-                regression_loss = F.smooth_l1_loss(reg_pred , regression)
+                pred_boxes , gt_boxes = extract_bounding_boxes(reg_pred , regression)
+                regression_loss = F.smooth_l1_loss(pred_boxes , gt_boxes)
                 loss_reg += regression_loss.item()
                 run['regression_loss'].log(regression_loss)
                 
@@ -70,7 +78,7 @@ def train(model , train_loader , val_loader ,
                 loss_class += cls_loss.item()
                 run['cls_loss'].log(cls_loss)
                 
-                batch_loss = cls_loss*0.4 + center_loss *0.2 + regression_loss*0.4
+                batch_loss = cls_loss*wclass + center_loss*wcenter + regression_loss*wregress
                 run['batch_loss'].log(batch_loss)
                 scaler.scale(batch_loss).backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -84,9 +92,7 @@ def train(model , train_loader , val_loader ,
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                if lr_schedule == 'onecyclelr':
-                    lr_schedule.step()
-                        
+           
             if lr_schedule == 'onecyclelr':
                 lr_schedule.step()
         if lr_schedule != 'onecyclelr':
@@ -150,7 +156,7 @@ def train(model , train_loader , val_loader ,
                 run['recall@0.9'].log(recall_09)
         avg_acc = total_accuracy / len(val_loader)  
         avg_iou = total_iou / len(val_loader)   
-        if avg_iou > saver :
+        if avg_iou > saver or avg_acc > saver_acc :
             checkpoint_path = os.path.join(out_dir, f'best_checkpoint.pth')
             torch.save({
                 'epoch': epoch + 1,
@@ -162,6 +168,7 @@ def train(model , train_loader , val_loader ,
                 'val_IoU' : iou
             }, checkpoint_path)
             saver = avg_iou
+            saver_acc = avg_acc
         log_json = {
             'epoch': epoch,
             'lr': lr_schedule.get_last_lr()[0],

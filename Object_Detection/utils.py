@@ -109,7 +109,7 @@ def calculate_iou(box1, box2):
     box2_area = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
     union_area = box1_area[:, None] + box2_area - inter_area
 
-    iou = inter_area / union_area
+    iou = inter_area / (union_area + 1e-6)
     return iou
 
 

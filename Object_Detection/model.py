@@ -47,7 +47,7 @@ class DetectorHead(nn.Module):
 class Detector(nn.Module):
     def __init__(self , num_classes = 6):
         super(Detector, self).__init__()
-        
+        self.num_classes = num_classes
         self.encoder_1 = nn.Sequential(   #  3 x 512 x 512 
             nn.Conv2d(3 , 16 , kernel_size = 3), # 16 x 510 x 510
             nn.ReLU(),
@@ -84,14 +84,37 @@ class Detector(nn.Module):
         #     nn.ReLU(),
         #     nn.BatchNorm2d(512),
         #     )
+         # Detection heads for each encoder layer output
+        self.detection_heads = nn.ModuleList([
+            DetectorHead(16, num_classes),
+            DetectorHead(32, num_classes),
+            DetectorHead(64, num_classes),
+            DetectorHead(128, num_classes),
+            DetectorHead(256, num_classes),
+            DetectorHead(512, num_classes)
+        ])
         
-        self.detection = DetectorHead(512 , num_classes = num_classes)
+    def forward(self, x):
+        encoders = [self.encoder_1, self.encoder_2, self.encoder_3, self.encoder_4, self.encoder_5, self.encoder_6]
         
-    def forward(self , x):
-        encoders = [self.encoder_1 , self.encoder_2 , self.encoder_3 , self.encoder_4 , self.encoder_5 , self.encoder_6]
-        for encoder_layer in encoders:
-            x = encoder_layer(x)   
+        cls_list, reg_list, center_list = [], [], []
+        
+        for i, encoder_layer in enumerate(encoders):
+            x = encoder_layer(x)
+            cls, regression, centerness = self.detection_heads[i](x)
             
-        cls , regression , centerness = self.detection(x) 
+            # Resize to the fixed size of 32x32
+            cls_resized = nn.functional.interpolate(cls, size=(32, 32), mode='bilinear', align_corners=False)
+            reg_resized = nn.functional.interpolate(regression, size=(32, 32), mode='bilinear', align_corners=False)
+            center_resized = nn.functional.interpolate(centerness, size=(32, 32), mode='bilinear', align_corners=False)
+            
+            cls_list.append(cls_resized)
+            reg_list.append(reg_resized)
+            center_list.append(center_resized)
         
-        return cls , regression , centerness
+        # Aggregate the results from different scales
+        mean_cls = torch.mean(torch.stack(cls_list), dim=0)
+        mean_reg = torch.mean(torch.stack(reg_list), dim=0)
+        mean_center = torch.mean(torch.stack(center_list), dim=0)
+        
+        return mean_cls, mean_reg, mean_center
