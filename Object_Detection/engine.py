@@ -13,7 +13,7 @@ from torchvision.ops import nms
 from utils import calculate_accuracy , calculate_iou , calculate_precision_recall , extract_bounding_boxes , regression_map_to_boxes
 
 def train(model , train_loader , val_loader ,
-          epochs , lr_cls , lr_reg , lr_center , device , lr_schedule ,
+          epochs , lr , device , lr_schedule ,
           out_dir ,   
           accum_steps = 4 , 
           neptune_config = None):
@@ -24,11 +24,7 @@ def train(model , train_loader , val_loader ,
         project = config.get('project')
 
     model = model.to(device)
-    optimizer = Adam([
-        {'params': model.class_head.parameters(), 'lr': lr_cls},
-        {'params': model.regression_head.parameters(), 'lr': lr_reg},
-        {'params': model.center_head.parameters(), 'lr': lr_center},
-    ])
+    optimizer = Adam(model.parameters() , lr = lr , weight_decay=1e-5 , amsgrad=False)
     scaler = GradScaler()
     if lr_schedule == "onecyclelr":
         lr_schedule = lr_scheduler.OneCycleLR(optimizer, max_lr=1e-6, steps_per_epoch=len(train_loader), epochs=epochs, pct_start=0.2)
@@ -127,7 +123,7 @@ def train(model , train_loader , val_loader ,
             cls = cls.to(device)
             centerness = centerness.to(device)
             
-            with torch.no_grad():
+            with torch.no_grad() , autocast():
                 
                 cls_pred , reg_pred , center_pred = model(img)
             # Calculate metrics
