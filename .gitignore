@@ -12,6 +12,7 @@ Classification/.neptune
 Classification/__pycache__
 Classification/CNN-Based/Networks
 Classification/CNN-Based/Attempts.txt
+Classification/Transformer-Based/scratchbook.ipynb
 Semantic-Segmentation/CNN-BASED/.neptune
 Semantic-Segmentation/CNN-BASED/weights
 Semantic-Segmentation/CNN-BASED/__pycache__
