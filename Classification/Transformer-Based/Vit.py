@@ -104,7 +104,6 @@ class Transformer_Encoder(nn.Module):
         embed_dim (int): Dimension of the input embeddings (typically the patch embedding dimension).
         num_heads (int): Number of attention heads. Must be divisible by the embed_dim.
         num_layers (int): Number of transformer encoder layers.
-        mlp_dim (int): Dimension of the feed-forward MLP inside each encoder layer.
     
     Returns:
     ------------
@@ -112,7 +111,7 @@ class Transformer_Encoder(nn.Module):
         The output after passing the input through multiple transformer encoder layers. The output includes both the class token and patch embeddings.
         
     """
-    def __init__(self , embed_dim , num_heads , num_layers , mlp_dim ):
+    def __init__(self , embed_dim , num_heads , num_layers ):
         super(Transformer_Encoder , self).__init__()
         
         self.layers = nn.ModuleList([
@@ -122,7 +121,7 @@ class Transformer_Encoder(nn.Module):
                 'mlp': nn.Sequential(
                     nn.Linear(embed_dim, 512),
                     nn.ReLU(),
-                    nn.Linear(512, mlp_dim),
+                    nn.Linear(512, embed_dim),
                     nn.ReLU(),
                 ),
                 'layernorm2': nn.LayerNorm(embed_dim)
@@ -169,12 +168,11 @@ class VisionTransformer(nn.Module):
                  embed_dim ,
                  max_patches, 
                  num_heads , 
-                 num_layers , 
-                 mlp_dim , 
+                 num_layers ,  
                  num_classes):
         super(VisionTransformer , self).__init__()
         self.patch_embed = Patch_Embed(patch_size , embed_dim , max_patches)
-        self.encoder = Transformer_Encoder(embed_dim , num_heads , num_layers , mlp_dim)
+        self.encoder = Transformer_Encoder(embed_dim , num_heads , num_layers)
         
         self.class_token = nn.Parameter(torch.zeros(1 , 1 , embed_dim))
         
