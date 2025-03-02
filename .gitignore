@@ -19,3 +19,5 @@ Datasets
 neptune.json
 bbox_Matching_ Algorithm.py
 Object_Detection/__pycache__
+*.pth
+*.pt.trace.json
